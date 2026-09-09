@@ -105,6 +105,7 @@ export function AppUninstallPage({ active }: { active: boolean }) {
     setUninstallingId(app.id)
     try {
       await AppUninstallService.Uninstall(app.id)
+      await load(true)
     } catch (reason) {
       showError(reason)
     } finally {

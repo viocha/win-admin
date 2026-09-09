@@ -375,11 +375,29 @@ func decodeInstalledAppID(id string) (uninstallRegistryLocation, string, error) 
 	return uninstallRegistryLocation{}, "", errors.New("应用标识无效")
 }
 
+type jobObjectBasicAccountingInformation struct {
+	TotalUserTime             int64
+	TotalKernelTime           int64
+	ThisPeriodTotalUserTime   int64
+	ThisPeriodTotalKernelTime int64
+	TotalPageFaultCount       uint32
+	TotalProcesses            uint32
+	ActiveProcesses           uint32
+	TotalTerminatedProcesses  uint32
+}
+
 func startWindowsCommand(command string) error {
 	commandLine, err := windows.UTF16PtrFromString(command)
 	if err != nil {
 		return fmt.Errorf("卸载命令无效: %w", err)
 	}
+
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return fmt.Errorf("创建卸载任务失败: %w", err)
+	}
+	defer windows.CloseHandle(job)
+
 	startupInfo := &windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfo{}))}
 	var processInfo windows.ProcessInformation
 	if err := windows.CreateProcess(
@@ -388,7 +406,7 @@ func startWindowsCommand(command string) error {
 		nil,
 		nil,
 		false,
-		windows.CREATE_NEW_PROCESS_GROUP,
+		windows.CREATE_NEW_PROCESS_GROUP|windows.CREATE_SUSPENDED,
 		nil,
 		nil,
 		startupInfo,
@@ -396,7 +414,39 @@ func startWindowsCommand(command string) error {
 	); err != nil {
 		return fmt.Errorf("启动卸载程序失败: %w", err)
 	}
-	windows.CloseHandle(processInfo.Thread)
-	windows.CloseHandle(processInfo.Process)
-	return nil
+	defer windows.CloseHandle(processInfo.Thread)
+	defer windows.CloseHandle(processInfo.Process)
+
+	if err := windows.AssignProcessToJobObject(job, processInfo.Process); err != nil {
+		_ = windows.TerminateProcess(processInfo.Process, 1)
+		return fmt.Errorf("跟踪卸载程序失败: %w", err)
+	}
+	if _, err := windows.ResumeThread(processInfo.Thread); err != nil {
+		_ = windows.TerminateProcess(processInfo.Process, 1)
+		return fmt.Errorf("启动卸载程序失败: %w", err)
+	}
+
+	return waitForJobProcesses(job)
+}
+
+func waitForJobProcesses(job windows.Handle) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		var info jobObjectBasicAccountingInformation
+		if err := windows.QueryInformationJobObject(
+			job,
+			windows.JobObjectBasicAccountingInformation,
+			uintptr(unsafe.Pointer(&info)),
+			uint32(unsafe.Sizeof(info)),
+			nil,
+		); err != nil {
+			return fmt.Errorf("等待卸载程序结束失败: %w", err)
+		}
+		if info.ActiveProcesses == 0 {
+			return nil
+		}
+		<-ticker.C
+	}
 }
