@@ -1,0 +1,50 @@
+version: '3'
+
+vars:
+  APP_NAME: "win-admin"
+  BIN_DIR: "bin"
+  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
+
+includes:
+  common: ./build/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+
+tasks:
+  build:
+    summary: Builds the Windows application
+    deps:
+      - task: common:build:frontend
+        vars:
+          DEV: '{{.DEV}}'
+          BUILD_FLAGS: '{{.BUILD_FLAGS}}'
+    cmds:
+      - task: windows:build
+        vars:
+          ARCH: '{{.ARCH}}'
+          DEV: '{{.DEV}}'
+          BUILD_FLAGS: '{{.BUILD_FLAGS}}'
+    vars:
+      BUILD_FLAGS: '{{if eq .DEV "true"}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui"{{end}}'
+
+  run:
+    summary: Runs the Windows application
+    cmds:
+      - task: windows:run
+
+  dev:
+    summary: Runs the Windows application in development mode
+    cmds:
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+
+  debug:webview:
+    summary: Runs the built Windows application with WebView2 remote debugging enabled
+    deps:
+      - build
+    vars:
+      DEBUG_PORT: '{{.WEBVIEW_DEBUG_PORT | default "9222"}}'
+    env:
+      WIN_ADMIN_WEBVIEW_DEBUG_PORT: '{{.DEBUG_PORT}}'
+    cmds:
+      - '{{.BIN_DIR}}/{{.APP_NAME}}.exe'
+
+

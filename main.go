@@ -1,0 +1,56 @@
+package main
+
+import (
+	"embed"
+	"fmt"
+	"log"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
+
+//go:embed all:frontend/dist
+var assets embed.FS
+
+func main() {
+	windowsOptions := application.WindowsOptions{}
+	if value := strings.TrimSpace(os.Getenv("WIN_ADMIN_WEBVIEW_DEBUG_PORT")); value != "" {
+		port, err := strconv.ParseUint(value, 10, 16)
+		if err != nil || port == 0 {
+			log.Fatalf("invalid WIN_ADMIN_WEBVIEW_DEBUG_PORT %q", value)
+		}
+		windowsOptions.AdditionalBrowserArgs = []string{fmt.Sprintf("--remote-debugging-port=%d", port)}
+	}
+
+	app := application.New(application.Options{
+		Name:        "win-admin",
+		Description: "Windows 系统管理工具",
+		Windows:     windowsOptions,
+		Services: []application.Service{
+			application.NewService(&ContextMenuService{}),
+			application.NewService(&ScheduledTaskService{}),
+			application.NewService(&ScheduledTaskTemplateService{}),
+			application.NewService(&EnvironmentVariableService{}),
+			application.NewService(&AppUninstallService{}),
+		},
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets),
+		},
+	})
+
+	app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            "win-admin",
+		Width:            1280,
+		Height:           820,
+		MinWidth:         720,
+		MinHeight:        640,
+		BackgroundColour: application.NewRGB(250, 250, 250),
+		URL:              "/",
+	})
+
+	if err := app.Run(); err != nil {
+		log.Fatal(err)
+	}
+}

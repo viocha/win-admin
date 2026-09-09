@@ -1,0 +1,402 @@
+//go:build windows
+
+package main
+
+import (
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
+)
+
+const uninstallRegistryPath = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
+
+type uninstallRegistryLocation struct {
+	root         registry.Key
+	scope        string
+	architecture string
+	view         uint32
+}
+
+var uninstallLocations = []uninstallRegistryLocation{
+	{registry.LOCAL_MACHINE, "system", "x64", registry.WOW64_64KEY},
+	{registry.LOCAL_MACHINE, "system", "x86", registry.WOW64_32KEY},
+	{registry.CURRENT_USER, "user", "x64", registry.WOW64_64KEY},
+	{registry.CURRENT_USER, "user", "x86", registry.WOW64_32KEY},
+}
+
+var installedAppIconPreviews sync.Map
+var installedAppDirectorySizes sync.Map
+
+func (s *AppUninstallService) List() ([]InstalledApp, error) {
+	apps := make([]InstalledApp, 0, 128)
+	seen := make(map[string]struct{}, 128)
+	for _, location := range uninstallLocations {
+		items, err := listInstalledAppsAt(location)
+		if err != nil {
+			continue
+		}
+		for _, item := range items {
+			key := strings.ToLower(item.Name + "\x00" + item.Version + "\x00" + item.Publisher + "\x00" + item.InstallLocation)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			apps = append(apps, item)
+		}
+	}
+	enrichInstalledAppSizes(apps)
+	sort.SliceStable(apps, func(i, j int) bool {
+		return strings.ToLower(apps[i].Name) < strings.ToLower(apps[j].Name)
+	})
+	return apps, nil
+}
+
+func (s *AppUninstallService) Uninstall(id string) error {
+	location, subkeyName, err := decodeInstalledAppID(id)
+	if err != nil {
+		return err
+	}
+	key, err := registry.OpenKey(location.root, uninstallRegistryPath+`\`+subkeyName, registry.QUERY_VALUE|location.view)
+	if err != nil {
+		return fmt.Errorf("读取应用卸载信息失败: %w", err)
+	}
+	defer key.Close()
+
+	command := readUninstallString(key, "UninstallString")
+	if command == "" {
+		command = readUninstallString(key, "QuietUninstallString")
+	}
+	if command == "" {
+		return errors.New("应用未提供卸载命令")
+	}
+	return startWindowsCommand(command)
+}
+
+func listInstalledAppsAt(location uninstallRegistryLocation) ([]InstalledApp, error) {
+	key, err := registry.OpenKey(location.root, uninstallRegistryPath, registry.ENUMERATE_SUB_KEYS|location.view)
+	if errors.Is(err, registry.ErrNotExist) {
+		return []InstalledApp{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer key.Close()
+
+	names, err := key.ReadSubKeyNames(-1)
+	if err != nil {
+		return nil, err
+	}
+	apps := make([]InstalledApp, 0, len(names))
+	for _, subkeyName := range names {
+		item, itemErr := readInstalledApp(location, subkeyName)
+		if itemErr == nil && item.Name != "" {
+			apps = append(apps, item)
+		}
+	}
+	return apps, nil
+}
+
+func readInstalledApp(location uninstallRegistryLocation, subkeyName string) (InstalledApp, error) {
+	key, err := registry.OpenKey(location.root, uninstallRegistryPath+`\`+subkeyName, registry.QUERY_VALUE|location.view)
+	if err != nil {
+		return InstalledApp{}, err
+	}
+	defer key.Close()
+
+	name := strings.TrimSpace(readUninstallString(key, "DisplayName"))
+	if name == "" || readUninstallDWORD(key, "SystemComponent") == 1 {
+		return InstalledApp{}, errors.New("不是可卸载应用")
+	}
+	if strings.TrimSpace(readUninstallString(key, "ParentKeyName")) != "" {
+		return InstalledApp{}, errors.New("跳过子组件")
+	}
+	if readUninstallString(key, "UninstallString") == "" && readUninstallString(key, "QuietUninstallString") == "" {
+		return InstalledApp{}, errors.New("应用未提供卸载命令")
+	}
+	displayIcon := strings.TrimSpace(readUninstallString(key, "DisplayIcon"))
+	uninstallString := strings.TrimSpace(readUninstallString(key, "UninstallString"))
+	quietUninstallString := strings.TrimSpace(readUninstallString(key, "QuietUninstallString"))
+	installLocation := inferInstallLocation(
+		readUninstallString(key, "InstallLocation"),
+		displayIcon,
+		uninstallString,
+		quietUninstallString,
+	)
+	installDate := normalizeInstallDate(readUninstallString(key, "InstallDate"))
+	if installDate == "" {
+		if info, statErr := key.Stat(); statErr == nil && !info.ModTime().IsZero() {
+			installDate = info.ModTime().Format("2006-01-02")
+		}
+	}
+	return InstalledApp{
+		ID:              encodeInstalledAppID(location, subkeyName),
+		Name:            name,
+		Icon:            installedAppIconPreview(displayIcon),
+		Version:         strings.TrimSpace(readUninstallString(key, "DisplayVersion")),
+		Publisher:       strings.TrimSpace(readUninstallString(key, "Publisher")),
+		InstallDate:     installDate,
+		EstimatedSizeKB: readUninstallDWORD(key, "EstimatedSize"),
+		InstallLocation: installLocation,
+		Scope:           location.scope,
+		Architecture:    location.architecture,
+	}, nil
+}
+
+func enrichInstalledAppSizes(apps []InstalledApp) {
+	type job struct {
+		index int
+		path  string
+	}
+	jobs := make(chan job)
+	var wg sync.WaitGroup
+	workerCount := 4
+	if len(apps) < workerCount {
+		workerCount = len(apps)
+	}
+	for range workerCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for current := range jobs {
+				apps[current.index].EstimatedSizeKB = installedAppDirectorySizeKB(current.path)
+			}
+		}()
+	}
+	for index := range apps {
+		if apps[index].EstimatedSizeKB != 0 || apps[index].InstallLocation == "" {
+			continue
+		}
+		jobs <- job{index: index, path: apps[index].InstallLocation}
+	}
+	close(jobs)
+	wg.Wait()
+}
+
+func inferInstallLocation(explicit, displayIcon, uninstallString, quietUninstallString string) string {
+	if path := normalizeInstallDirectory(explicit); path != "" {
+		return path
+	}
+	for _, source := range []string{displayIcon, uninstallString, quietUninstallString} {
+		candidate := installedAppSourcePath(source)
+		if candidate == "" {
+			continue
+		}
+		if info, err := os.Stat(candidate); err == nil {
+			if info.IsDir() {
+				if path := normalizeInstallDirectory(candidate); path != "" {
+					return path
+				}
+			} else if path := normalizeInstallDirectory(filepath.Dir(candidate)); path != "" {
+				return path
+			}
+		}
+	}
+	return ""
+}
+
+func installedAppSourcePath(source string) string {
+	source = strings.TrimSpace(os.ExpandEnv(source))
+	if source == "" {
+		return ""
+	}
+	if strings.HasPrefix(source, `"`) {
+		if end := strings.Index(source[1:], `"`); end >= 0 {
+			return filepath.Clean(source[1 : end+1])
+		}
+	}
+	if info, err := os.Stat(strings.Trim(source, `"`)); err == nil && !info.IsDir() {
+		return filepath.Clean(strings.Trim(source, `"`))
+	}
+	lower := strings.ToLower(source)
+	for _, extension := range []string{".exe", ".com", ".bat", ".cmd", ".ico", ".dll"} {
+		if end := strings.Index(lower, extension); end >= 0 {
+			candidate := strings.Trim(strings.TrimSpace(source[:end+len(extension)]), `"`)
+			if candidate != "" {
+				return filepath.Clean(candidate)
+			}
+		}
+	}
+	if comma := strings.LastIndex(source, ","); comma > 0 {
+		if _, err := strconv.Atoi(strings.TrimSpace(source[comma+1:])); err == nil {
+			return filepath.Clean(strings.Trim(strings.TrimSpace(source[:comma]), `"`))
+		}
+	}
+	return ""
+}
+
+func normalizeInstallDirectory(path string) string {
+	path = strings.TrimSpace(os.ExpandEnv(strings.Trim(path, `"`)))
+	if path == "" {
+		return ""
+	}
+	clean := filepath.Clean(path)
+	info, err := os.Stat(clean)
+	if err != nil || !info.IsDir() || !usefulInstallDirectory(clean) {
+		return ""
+	}
+	return clean
+}
+
+func usefulInstallDirectory(path string) bool {
+	clean := strings.TrimRight(filepath.Clean(path), `\\/`)
+	if clean == "" || strings.EqualFold(clean+`\\`, filepath.VolumeName(clean)+`\\`) {
+		return false
+	}
+	for _, broad := range []string{
+		os.Getenv("SystemRoot"),
+		os.Getenv("ProgramFiles"),
+		os.Getenv("ProgramFiles(x86)"),
+		os.Getenv("ProgramData"),
+		os.Getenv("USERPROFILE"),
+		os.Getenv("LOCALAPPDATA"),
+		os.Getenv("APPDATA"),
+	} {
+		if broad != "" && strings.EqualFold(clean, strings.TrimRight(filepath.Clean(broad), `\\/`)) {
+			return false
+		}
+	}
+	return true
+}
+
+func installedAppDirectorySizeKB(path string) uint64 {
+	cacheKey := strings.ToLower(filepath.Clean(path))
+	if cached, ok := installedAppDirectorySizes.Load(cacheKey); ok {
+		return cached.(uint64)
+	}
+	var size uint64
+	_ = filepath.WalkDir(path, func(current string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if entry != nil && entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr == nil && info.Size() > 0 {
+			size += uint64(info.Size())
+		}
+		return nil
+	})
+	result := (size + 1023) / 1024
+	installedAppDirectorySizes.Store(cacheKey, result)
+	return result
+}
+
+func installedAppIconPreview(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return ""
+	}
+	if cached, ok := installedAppIconPreviews.Load(source); ok {
+		return cached.(string)
+	}
+	preview, err := iconPreviewDataURL(source, 32)
+	if err != nil {
+		installedAppIconPreviews.Store(source, "")
+		return ""
+	}
+	installedAppIconPreviews.Store(source, preview)
+	return preview
+}
+
+func readUninstallString(key registry.Key, name string) string {
+	value, _, err := key.GetStringValue(name)
+	if err != nil {
+		return ""
+	}
+	return value
+}
+
+func readUninstallDWORD(key registry.Key, name string) uint64 {
+	value, _, err := key.GetIntegerValue(name)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+func normalizeInstallDate(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	for _, layout := range []string{
+		"20060102",
+		"2006-01-02",
+		time.ANSIC,
+		time.RFC1123,
+		time.RFC1123Z,
+		"Jan 2 2006",
+		"January 2 2006",
+		"01/02/2006",
+		"1/2/2006",
+	} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.Format("2006-01-02")
+		}
+	}
+	return value
+}
+
+func encodeInstalledAppID(location uninstallRegistryLocation, subkeyName string) string {
+	payload := location.scope + "\x00" + location.architecture + "\x00" + subkeyName
+	return base64.RawURLEncoding.EncodeToString([]byte(payload))
+}
+
+func decodeInstalledAppID(id string) (uninstallRegistryLocation, string, error) {
+	data, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(id))
+	if err != nil {
+		return uninstallRegistryLocation{}, "", errors.New("应用标识无效")
+	}
+	parts := strings.SplitN(string(data), "\x00", 3)
+	if len(parts) != 3 || strings.TrimSpace(parts[2]) == "" {
+		return uninstallRegistryLocation{}, "", errors.New("应用标识无效")
+	}
+	for _, location := range uninstallLocations {
+		if location.scope == parts[0] && location.architecture == parts[1] {
+			return location, parts[2], nil
+		}
+	}
+	return uninstallRegistryLocation{}, "", errors.New("应用标识无效")
+}
+
+func startWindowsCommand(command string) error {
+	commandLine, err := windows.UTF16PtrFromString(command)
+	if err != nil {
+		return fmt.Errorf("卸载命令无效: %w", err)
+	}
+	startupInfo := &windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfo{}))}
+	var processInfo windows.ProcessInformation
+	if err := windows.CreateProcess(
+		nil,
+		commandLine,
+		nil,
+		nil,
+		false,
+		windows.CREATE_NEW_PROCESS_GROUP,
+		nil,
+		nil,
+		startupInfo,
+		&processInfo,
+	); err != nil {
+		return fmt.Errorf("启动卸载程序失败: %w", err)
+	}
+	windows.CloseHandle(processInfo.Thread)
+	windows.CloseHandle(processInfo.Process)
+	return nil
+}
