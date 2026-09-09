@@ -158,7 +158,7 @@ export function ContextMenuPage({ active }: { active: boolean }) {
     if (entry.target !== target) {
       setTarget(entry.target as TargetType)
     } else {
-      await load(target)
+      await load(target, true)
     }
   }
 
@@ -225,7 +225,7 @@ export function ContextMenuPage({ active }: { active: boolean }) {
     try {
       await ContextMenuService.Delete(deleteEntry.registryPath)
       setDeleteOpen(false)
-      await load(target)
+      await load(target, true)
     } catch (reason) {
       showError(reason)
     }

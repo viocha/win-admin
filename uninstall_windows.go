@@ -141,9 +141,13 @@ func readInstalledApp(location uninstallRegistryLocation, subkeyName string) (In
 		}
 	}
 	return InstalledApp{
-		ID:              encodeInstalledAppID(location, subkeyName),
-		Name:            name,
-		Icon:            installedAppIconPreview(displayIcon),
+		ID:   encodeInstalledAppID(location, subkeyName),
+		Name: name,
+		Icon: installedAppIconPreview(
+			displayIcon,
+			msiProductIcon(subkeyName),
+			findInstalledAppExecutable(name, installLocation),
+		),
 		Version:         strings.TrimSpace(readUninstallString(key, "DisplayVersion")),
 		Publisher:       strings.TrimSpace(readUninstallString(key, "Publisher")),
 		InstallDate:     installDate,
@@ -297,21 +301,160 @@ func installedAppDirectorySizeKB(path string) uint64 {
 	return result
 }
 
-func installedAppIconPreview(source string) string {
-	source = strings.TrimSpace(source)
-	if source == "" {
+func installedAppIconPreview(sources ...string) string {
+	seen := make(map[string]struct{}, len(sources))
+	for _, source := range sources {
+		source = strings.TrimSpace(source)
+		if source == "" {
+			continue
+		}
+		cacheKey := strings.ToLower(source)
+		if _, exists := seen[cacheKey]; exists {
+			continue
+		}
+		seen[cacheKey] = struct{}{}
+
+		if cached, ok := installedAppIconPreviews.Load(cacheKey); ok {
+			if preview := cached.(string); preview != "" {
+				return preview
+			}
+			continue
+		}
+		preview, err := iconPreviewDataURL(source, 32)
+		if err != nil {
+			installedAppIconPreviews.Store(cacheKey, "")
+			continue
+		}
+		installedAppIconPreviews.Store(cacheKey, preview)
+		return preview
+	}
+	return ""
+}
+
+func msiProductIcon(uninstallSubkey string) string {
+	productKey, ok := packedMSIProductCode(uninstallSubkey)
+	if !ok {
 		return ""
 	}
-	if cached, ok := installedAppIconPreviews.Load(source); ok {
-		return cached.(string)
-	}
-	preview, err := iconPreviewDataURL(source, 32)
+	key, err := registry.OpenKey(registry.CLASSES_ROOT, `Installer\Products\`+productKey, registry.QUERY_VALUE)
 	if err != nil {
-		installedAppIconPreviews.Store(source, "")
 		return ""
 	}
-	installedAppIconPreviews.Store(source, preview)
-	return preview
+	defer key.Close()
+	return strings.TrimSpace(readUninstallString(key, "ProductIcon"))
+}
+
+func packedMSIProductCode(value string) (string, bool) {
+	value = strings.TrimSpace(strings.Trim(value, "{}"))
+	parts := strings.Split(value, "-")
+	if len(parts) != 5 || len(parts[0]) != 8 || len(parts[1]) != 4 || len(parts[2]) != 4 || len(parts[3]) != 4 || len(parts[4]) != 12 {
+		return "", false
+	}
+	for _, part := range parts {
+		for _, char := range part {
+			if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+				return "", false
+			}
+		}
+	}
+	return strings.ToUpper(
+		reverseASCII(parts[0]) +
+			reverseASCII(parts[1]) +
+			reverseASCII(parts[2]) +
+			swapHexPairs(parts[3]) +
+			swapHexPairs(parts[4]),
+	), true
+}
+
+func reverseASCII(value string) string {
+	bytes := []byte(value)
+	for left, right := 0, len(bytes)-1; left < right; left, right = left+1, right-1 {
+		bytes[left], bytes[right] = bytes[right], bytes[left]
+	}
+	return string(bytes)
+}
+
+func swapHexPairs(value string) string {
+	bytes := []byte(value)
+	for index := 0; index+1 < len(bytes); index += 2 {
+		bytes[index], bytes[index+1] = bytes[index+1], bytes[index]
+	}
+	return string(bytes)
+}
+
+func findInstalledAppExecutable(name, installLocation string) string {
+	directory := normalizeInstallDirectory(installLocation)
+	if directory == "" {
+		return ""
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return ""
+	}
+
+	appName := installedAppMatchName(name)
+	bestPath := ""
+	bestScore := -1
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".exe") {
+			continue
+		}
+		base := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+		candidate := normalizeAppName(base)
+		if candidate == "" || isAuxiliaryExecutable(candidate) {
+			continue
+		}
+
+		score := 0
+		switch {
+		case candidate == appName && appName != "":
+			score = 100
+		case appName != "" && strings.HasPrefix(candidate, appName):
+			score = 80
+		case appName != "" && strings.HasPrefix(appName, candidate) && len(candidate) >= 4:
+			score = 70
+		case appName != "" && strings.Contains(candidate, appName):
+			score = 60
+		}
+		if score > bestScore {
+			bestScore = score
+			bestPath = filepath.Join(directory, entry.Name())
+		}
+	}
+	if bestScore <= 0 {
+		return ""
+	}
+	return bestPath
+}
+
+func installedAppMatchName(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for _, marker := range []string{" version ", " 版本 "} {
+		if index := strings.Index(lower, marker); index >= 0 {
+			name = name[:index]
+			break
+		}
+	}
+	return normalizeAppName(name)
+}
+
+func normalizeAppName(value string) string {
+	var builder strings.Builder
+	for _, char := range strings.ToLower(value) {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') {
+			builder.WriteRune(char)
+		}
+	}
+	return builder.String()
+}
+
+func isAuxiliaryExecutable(name string) bool {
+	for _, marker := range []string{"unins", "uninstall", "setup", "update", "updater", "helper", "service", "crash", "repair"} {
+		if strings.Contains(name, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func readUninstallString(key registry.Key, name string) string {

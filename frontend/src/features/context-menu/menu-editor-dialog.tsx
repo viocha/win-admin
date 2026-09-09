@@ -242,7 +242,7 @@ export function MenuEditorDialog({
           </Button>
           <Button onClick={submit} disabled={saving}>
             <SaveIcon data-icon="inline-start" />
-            {saving ? "保存中…" : "保存"}
+            保存
           </Button>
         </DialogFooter>
       </DialogContent>

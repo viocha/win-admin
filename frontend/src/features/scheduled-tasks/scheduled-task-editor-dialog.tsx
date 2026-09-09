@@ -504,7 +504,7 @@ export function ScheduledTaskEditorDialog({
             <XIcon data-icon="inline-start" />取消
           </Button>
           <Button onClick={() => void submit()} disabled={saving}>
-            <SaveIcon data-icon="inline-start" />{saving ? "保存中…" : "保存"}
+            <SaveIcon data-icon="inline-start" />保存
           </Button>
         </DialogFooter>
       </DialogContent>
