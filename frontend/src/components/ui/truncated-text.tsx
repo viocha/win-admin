@@ -46,7 +46,7 @@ function TruncatedText({
           render={
             <span
               ref={textRef}
-              className="inline-block max-w-full overflow-hidden text-ellipsis whitespace-nowrap align-bottom"
+              className="inline-block max-w-full truncate align-bottom"
             >
               {value}
             </span>
