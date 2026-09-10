@@ -18,6 +18,10 @@ export function List(): $CancellablePromise<$models.InstalledApp[] | null> {
     return $Call.ByID(144482274);
 }
 
+export function Sizes(ids: string[] | null): $CancellablePromise<$models.InstalledAppSize[] | null> {
+    return $Call.ByID(1548451244, ids);
+}
+
 export function Uninstall(id: string): $CancellablePromise<void> {
     return $Call.ByID(917895824, id);
 }

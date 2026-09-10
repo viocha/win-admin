@@ -19,6 +19,7 @@ export type {
     EnvironmentPathEntry,
     EnvironmentVariable,
     InstalledApp,
+    InstalledAppSize,
     MenuEntry,
     SaveEnvironmentPathRequest,
     SaveEnvironmentVariableRequest,

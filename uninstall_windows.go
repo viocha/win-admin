@@ -56,11 +56,56 @@ func (s *AppUninstallService) List() ([]InstalledApp, error) {
 			apps = append(apps, item)
 		}
 	}
-	enrichInstalledAppSizes(apps)
 	sort.SliceStable(apps, func(i, j int) bool {
 		return strings.ToLower(apps[i].Name) < strings.ToLower(apps[j].Name)
 	})
 	return apps, nil
+}
+
+func (s *AppUninstallService) Sizes(ids []string) []InstalledAppSize {
+	if len(ids) == 0 {
+		return []InstalledAppSize{}
+	}
+
+	type job struct {
+		index int
+		id    string
+	}
+	results := make([]InstalledAppSize, len(ids))
+	valid := make([]bool, len(ids))
+	jobs := make(chan job)
+	var wg sync.WaitGroup
+	workerCount := 4
+	if len(ids) < workerCount {
+		workerCount = len(ids)
+	}
+	for range workerCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for current := range jobs {
+				size, ok := installedAppSize(current.id)
+				if !ok {
+					continue
+				}
+				results[current.index] = InstalledAppSize{ID: current.id, EstimatedSizeKB: size}
+				valid[current.index] = true
+			}
+		}()
+	}
+	for index, id := range ids {
+		jobs <- job{index: index, id: id}
+	}
+	close(jobs)
+	wg.Wait()
+
+	resolved := make([]InstalledAppSize, 0, len(ids))
+	for index, item := range results {
+		if valid[index] {
+			resolved = append(resolved, item)
+		}
+	}
+	return resolved
 }
 
 func (s *AppUninstallService) Uninstall(id string) error {
@@ -158,34 +203,30 @@ func readInstalledApp(location uninstallRegistryLocation, subkeyName string) (In
 	}, nil
 }
 
-func enrichInstalledAppSizes(apps []InstalledApp) {
-	type job struct {
-		index int
-		path  string
+func installedAppSize(id string) (uint64, bool) {
+	location, subkeyName, err := decodeInstalledAppID(id)
+	if err != nil {
+		return 0, false
 	}
-	jobs := make(chan job)
-	var wg sync.WaitGroup
-	workerCount := 4
-	if len(apps) < workerCount {
-		workerCount = len(apps)
+	key, err := registry.OpenKey(location.root, uninstallRegistryPath+`\\`+subkeyName, registry.QUERY_VALUE|location.view)
+	if err != nil {
+		return 0, false
 	}
-	for range workerCount {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for current := range jobs {
-				apps[current.index].EstimatedSizeKB = installedAppDirectorySizeKB(current.path)
-			}
-		}()
+	defer key.Close()
+
+	if size := readUninstallDWORD(key, "EstimatedSize"); size != 0 {
+		return size, true
 	}
-	for index := range apps {
-		if apps[index].EstimatedSizeKB != 0 || apps[index].InstallLocation == "" {
-			continue
-		}
-		jobs <- job{index: index, path: apps[index].InstallLocation}
+	installLocation := inferInstallLocation(
+		readUninstallString(key, "InstallLocation"),
+		readUninstallString(key, "DisplayIcon"),
+		readUninstallString(key, "UninstallString"),
+		readUninstallString(key, "QuietUninstallString"),
+	)
+	if installLocation == "" {
+		return 0, true
 	}
-	close(jobs)
-	wg.Wait()
+	return installedAppDirectorySizeKB(installLocation), true
 }
 
 func inferInstallLocation(explicit, displayIcon, uninstallString, quietUninstallString string) string {

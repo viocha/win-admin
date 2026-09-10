@@ -15,3 +15,8 @@ type InstalledApp struct {
 	Scope           string `json:"scope"`
 	Architecture    string `json:"architecture"`
 }
+
+type InstalledAppSize struct {
+	ID              string `json:"id"`
+	EstimatedSizeKB uint64 `json:"estimatedSizeKB"`
+}

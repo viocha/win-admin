@@ -62,16 +62,36 @@ export function AppUninstallPage({ active }: { active: boolean }) {
   const [uninstallingId, setUninstallingId] = useState("")
   const [sort, setSort] = useState<SortState>(loadSortState)
   const hasLoadedRef = useRef(false)
+  const loadGenerationRef = useRef(0)
 
   const load = useCallback(async (silent = false) => {
+    const generation = ++loadGenerationRef.current
     if (!silent) setLoading(true)
     try {
-      setApps((await AppUninstallService.List()) ?? [])
+      const nextApps = (await AppUninstallService.List()) ?? []
+      if (generation !== loadGenerationRef.current) return
+      setApps(nextApps)
       hasLoadedRef.current = true
+
+      const missingSizeIds = nextApps
+        .filter((app) => !app.estimatedSizeKB && app.installLocation)
+        .map((app) => app.id)
+      if (missingSizeIds.length) {
+        void AppUninstallService.Sizes(missingSizeIds)
+          .then((sizes) => {
+            if (generation !== loadGenerationRef.current || !sizes?.length) return
+            const sizeById = new Map(sizes.map((item) => [item.id, item.estimatedSizeKB]))
+            setApps((current) => current.map((app) => {
+              const estimatedSizeKB = sizeById.get(app.id)
+              return estimatedSizeKB === undefined ? app : { ...app, estimatedSizeKB }
+            }))
+          })
+          .catch(() => {})
+      }
     } catch (reason) {
-      showError(reason)
+      if (generation === loadGenerationRef.current) showError(reason)
     } finally {
-      if (!silent) setLoading(false)
+      if (!silent && generation === loadGenerationRef.current) setLoading(false)
     }
   }, [])
 

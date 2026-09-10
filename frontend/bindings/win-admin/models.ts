@@ -33,6 +33,11 @@ export interface InstalledApp {
     "architecture": string;
 }
 
+export interface InstalledAppSize {
+    "id": string;
+    "estimatedSizeKB": number;
+}
+
 export interface MenuEntry {
     "id": string;
     "label": string;
