@@ -24,10 +24,20 @@ func main() {
 		windowsOptions.AdditionalBrowserArgs = []string{fmt.Sprintf("--remote-debugging-port=%d", port)}
 	}
 
+	var window *application.WebviewWindow
 	app := application.New(application.Options{
 		Name:        "win-admin",
 		Description: "Windows 系统管理工具",
 		Windows:     windowsOptions,
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: "win-admin",
+			OnSecondInstanceLaunch: func(_ application.SecondInstanceData) {
+				if window != nil {
+					window.Restore()
+					window.Focus()
+				}
+			},
+		},
 		Services: []application.Service{
 			application.NewService(&ContextMenuService{}),
 			application.NewService(&ScheduledTaskService{}),
@@ -40,7 +50,7 @@ func main() {
 		},
 	})
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	window = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "win-admin",
 		Width:            1280,
 		Height:           820,

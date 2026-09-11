@@ -180,9 +180,17 @@ func readInstalledApp(location uninstallRegistryLocation, subkeyName string) (In
 		quietUninstallString,
 	)
 	installDate := normalizeInstallDate(readUninstallString(key, "InstallDate"))
-	if installDate == "" {
-		if info, statErr := key.Stat(); statErr == nil && !info.ModTime().IsZero() {
-			installDate = info.ModTime().Format("2006-01-02")
+	var installTimestamp int64
+	if info, statErr := key.Stat(); statErr == nil && !info.ModTime().IsZero() {
+		modifiedAt := info.ModTime()
+		modifiedDate := modifiedAt.Format("2006-01-02")
+		if installDate == "" {
+			installDate = modifiedDate
+		}
+		// InstallDate 通常只有日期。仅当注册表项修改日期与安装日期一致时，
+		// 才把修改时间作为同一天内排序的辅助依据，避免后续更新影响排序。
+		if installDate == modifiedDate {
+			installTimestamp = modifiedAt.UnixMilli()
 		}
 	}
 	return InstalledApp{
@@ -193,13 +201,14 @@ func readInstalledApp(location uninstallRegistryLocation, subkeyName string) (In
 			msiProductIcon(subkeyName),
 			findInstalledAppExecutable(name, installLocation),
 		),
-		Version:         strings.TrimSpace(readUninstallString(key, "DisplayVersion")),
-		Publisher:       strings.TrimSpace(readUninstallString(key, "Publisher")),
-		InstallDate:     installDate,
-		EstimatedSizeKB: readUninstallDWORD(key, "EstimatedSize"),
-		InstallLocation: installLocation,
-		Scope:           location.scope,
-		Architecture:    location.architecture,
+		Version:          strings.TrimSpace(readUninstallString(key, "DisplayVersion")),
+		Publisher:        strings.TrimSpace(readUninstallString(key, "Publisher")),
+		InstallDate:      installDate,
+		InstallTimestamp: installTimestamp,
+		EstimatedSizeKB:  readUninstallDWORD(key, "EstimatedSize"),
+		InstallLocation:  installLocation,
+		Scope:            location.scope,
+		Architecture:     location.architecture,
 	}, nil
 }
 

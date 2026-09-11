@@ -27,6 +27,7 @@ export interface InstalledApp {
     "version": string;
     "publisher": string;
     "installDate": string;
+    "installTimestamp": number;
     "estimatedSizeKB": number;
     "installLocation": string;
     "scope": string;

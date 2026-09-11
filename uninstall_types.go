@@ -4,16 +4,17 @@ package main
 type AppUninstallService struct{}
 
 type InstalledApp struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Icon            string `json:"icon"`
-	Version         string `json:"version"`
-	Publisher       string `json:"publisher"`
-	InstallDate     string `json:"installDate"`
-	EstimatedSizeKB uint64 `json:"estimatedSizeKB"`
-	InstallLocation string `json:"installLocation"`
-	Scope           string `json:"scope"`
-	Architecture    string `json:"architecture"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Icon             string `json:"icon"`
+	Version          string `json:"version"`
+	Publisher        string `json:"publisher"`
+	InstallDate      string `json:"installDate"`
+	InstallTimestamp int64  `json:"installTimestamp"`
+	EstimatedSizeKB  uint64 `json:"estimatedSizeKB"`
+	InstallLocation  string `json:"installLocation"`
+	Scope            string `json:"scope"`
+	Architecture     string `json:"architecture"`
 }
 
 type InstalledAppSize struct {

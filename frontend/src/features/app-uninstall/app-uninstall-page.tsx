@@ -259,7 +259,10 @@ function compareApps(left: InstalledApp, right: InstalledApp, key: SortKey, dire
     return compareOptionalNumber(left.estimatedSizeKB, right.estimatedSizeKB, direction)
   }
 
-  return compareOptionalNumber(installDateValue(left.installDate), installDateValue(right.installDate), direction)
+  const dateResult = compareOptionalNumber(installDateValue(left.installDate), installDateValue(right.installDate), direction)
+  if (dateResult !== 0) return dateResult
+
+  return compareOptionalNumber(left.installTimestamp, right.installTimestamp, direction)
 }
 
 function compareOptionalNumber(left: number, right: number, direction: SortDirection): number {
