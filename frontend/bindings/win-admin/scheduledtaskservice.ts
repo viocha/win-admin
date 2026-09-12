@@ -34,6 +34,14 @@ export function Get(taskPath: string): $CancellablePromise<$models.ScheduledTask
     return $Call.ByID(1865165097, taskPath);
 }
 
+export function History(taskPath: string, limit: number): $CancellablePromise<$models.ScheduledTaskHistoryEvent[] | null> {
+    return $Call.ByID(3785955409, taskPath, limit);
+}
+
+export function HistoryEnabled(): $CancellablePromise<boolean> {
+    return $Call.ByID(2957386170);
+}
+
 export function ImportXML(): $CancellablePromise<$models.ScheduledTaskEdit | null> {
     return $Call.ByID(1105842291);
 }
@@ -60,6 +68,10 @@ export function Save(request: $models.SaveScheduledTaskRequest): $CancellablePro
 
 export function SetEnabled(taskPath: string, enabled: boolean): $CancellablePromise<void> {
     return $Call.ByID(2087369198, taskPath, enabled);
+}
+
+export function SetHistoryEnabled(enabled: boolean): $CancellablePromise<void> {
+    return $Call.ByID(4091202164, enabled);
 }
 
 export function Stop(taskPath: string): $CancellablePromise<void> {

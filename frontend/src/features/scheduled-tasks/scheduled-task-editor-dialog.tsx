@@ -65,7 +65,7 @@ type ScheduledTaskEditorDialogProps = {
   onTemplateNameChange?: (name: string) => void
   onOpenChange: (open: boolean) => void
   onOpenChangeComplete?: (open: boolean) => void
-  onSave: (task: ScheduledTaskEdit, previousPath: string) => Promise<void>
+  onSave: (task: ScheduledTaskEdit, previousPath: string, password: string) => Promise<void>
 }
 
 const INSTANCE_POLICIES = [
@@ -73,6 +73,11 @@ const INSTANCE_POLICIES = [
   { value: "parallel", label: "并行运行" },
   { value: "queue", label: "排队运行" },
   { value: "stopExisting", label: "停止现有实例" },
+]
+
+const LOGON_MODES = [
+  { value: "3", label: "只在用户登录时运行" },
+  { value: "1", label: "不管用户是否登录都要运行" },
 ]
 
 const DURATION_UNITS: Array<{ value: DurationUnit; label: string }> = [
@@ -98,9 +103,13 @@ export function ScheduledTaskEditorDialog({
   const [saving, setSaving] = useState(false)
   const [picking, setPicking] = useState(false)
   const [importingXML, setImportingXML] = useState(false)
+  const [password, setPassword] = useState("")
+  const [restartCountPreset, setRestartCountPreset] = useState(task?.settings.restartCount || 3)
 
   useEffect(() => {
     setDraft(task ? cloneScheduledTask(task) : null)
+    setPassword("")
+    setRestartCountPreset(task?.settings.restartCount || 3)
   }, [task, open])
 
   if (!draft) return null
@@ -118,9 +127,13 @@ export function ScheduledTaskEditorDialog({
       showErrorMessage(validationError, "无法保存")
       return
     }
+    if (!templateMode && taskToSave.logonType === 1 && !password) {
+      showErrorMessage("不管用户是否登录都要运行时需要输入账户密码", "无法保存")
+      return
+    }
     setSaving(true)
     try {
-      await onSave(taskToSave, previousPath)
+      await onSave(taskToSave, previousPath, templateMode ? "" : password)
       onOpenChange(false)
     } catch (reason) {
       showError(reason, "无法保存")
@@ -152,6 +165,8 @@ export function ScheduledTaskEditorDialog({
       const imported = await ScheduledTaskService.ImportXML()
       if (imported) {
         setDraft(cloneScheduledTask(imported))
+        setPassword("")
+        setRestartCountPreset(imported.settings.restartCount || 3)
       }
     } catch (reason) {
       showError(reason, "无法导入 XML")
@@ -177,15 +192,16 @@ export function ScheduledTaskEditorDialog({
     <Dialog open={open} onOpenChange={onOpenChange} onOpenChangeComplete={onOpenChangeComplete}>
       <DialogContent className="flex h-[min(680px,calc(100vh-2rem))] !w-[min(92vw,56rem)] min-w-0 !max-w-none flex-col overflow-hidden">
         <DialogHeader>
-          <DialogTitle>{title ?? (previousPath ? "编辑计划任务" : "添加计划任务")}</DialogTitle>
+          <div className="flex min-w-0 items-center justify-between gap-3 pr-8">
+            <DialogTitle className="min-w-0 truncate">{title ?? (previousPath ? "编辑计划任务" : "添加计划任务")}</DialogTitle>
+            {allowXMLImport ? (
+              <Button variant="outline" size="sm" className="shrink-0" onClick={() => void importXML()} disabled={importingXML || saving}>
+                {importingXML ? <LoaderCircleIcon data-icon="inline-start" className="size-4 self-center animate-spin" /> : <FileUpIcon data-icon="inline-start" />}
+                导入 XML
+              </Button>
+            ) : null}
+          </div>
         </DialogHeader>
-
-        {allowXMLImport ? (
-          <Button variant="outline" size="sm" className="self-start" onClick={() => void importXML()} disabled={importingXML || saving}>
-            {importingXML ? <LoaderCircleIcon data-icon="inline-start" className="size-4 self-center animate-spin" /> : <FileUpIcon data-icon="inline-start" />}
-            导入 XML
-          </Button>
-        ) : null}
 
         <Tabs defaultValue="general" className="flex min-h-0 flex-1 flex-col">
           <TabsList className="grid w-full shrink-0 grid-cols-5">
@@ -234,6 +250,53 @@ export function ScheduledTaskEditorDialog({
                   />
                 </Field>
 
+                <Field className="min-w-0">
+                  <FieldLabel>登录方式</FieldLabel>
+                  <Select
+                    items={logonModeOptions(draft.logonType)}
+                    value={draft.logonType === 2 ? "1" : String(draft.logonType)}
+                    onValueChange={(value) => {
+                      if (!value) return
+                      const next = Number(value)
+                      setDraft({ ...draft, logonType: next })
+                      if (next !== 1) setPassword("")
+                    }}
+                  >
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {logonModeOptions(draft.logonType).map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+
+                {draft.logonType === 1 || draft.logonType === 2 ? (
+                  <SwitchRow
+                    label="不存储密码，仅访问本机资源"
+                    separated={false}
+                    checked={draft.logonType === 2}
+                    onCheckedChange={(checked) => {
+                      setDraft({ ...draft, logonType: checked ? 2 : 1 })
+                      if (checked) setPassword("")
+                    }}
+                  />
+                ) : null}
+
+                {!templateMode && draft.logonType === 1 ? (
+                  <Field className="min-w-0">
+                    <FieldLabel htmlFor="task-password">账户密码</FieldLabel>
+                    <Input
+                      id="task-password"
+                      type="password"
+                      value={password}
+                      autoComplete="new-password"
+                      placeholder={previousPath ? "重新保存时需要再次输入密码" : "输入运行账户密码"}
+                      onChange={(event) => setPassword(event.target.value)}
+                    />
+                  </Field>
+                ) : null}
+
                 <FieldGroup className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
                   <SwitchRow
                     label="启用"
@@ -263,7 +326,7 @@ export function ScheduledTaskEditorDialog({
                   />
                 </Field>
 
-                <FieldGroup className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]">
+                <FieldGroup className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)] md:items-end">
                   <div className="overflow-hidden rounded-lg border">
                     <SwitchRow
                       label="隐藏"
@@ -455,15 +518,44 @@ export function ScheduledTaskEditorDialog({
             </TabsContent>
 
             <TabsContent value="conditions" className="m-0 px-1 py-2">
-              <div className="overflow-hidden rounded-lg border">
-                <SwitchRow label="使用电池时不启动" checked={draft.settings.disallowStartIfOnBatteries} onCheckedChange={(checked) => updateSetting("disallowStartIfOnBatteries", checked)} />
-                <SwitchRow label="切换到电池时停止" checked={draft.settings.stopIfGoingOnBatteries} onCheckedChange={(checked) => updateSetting("stopIfGoingOnBatteries", checked)} />
-                <SwitchRow label="仅网络可用时运行" checked={draft.settings.runOnlyIfNetworkAvailable} onCheckedChange={(checked) => updateSetting("runOnlyIfNetworkAvailable", checked)} />
-                <SwitchRow label="仅计算机空闲时运行" checked={draft.settings.runOnlyIfIdle} onCheckedChange={(checked) => updateSetting("runOnlyIfIdle", checked)} />
-                <SwitchRow label="空闲结束时停止" checked={draft.settings.stopOnIdleEnd} onCheckedChange={(checked) => updateSetting("stopOnIdleEnd", checked)} />
-                <SwitchRow label="再次空闲时重新启动" checked={draft.settings.restartOnIdle} onCheckedChange={(checked) => updateSetting("restartOnIdle", checked)} />
-                <SwitchRow label="唤醒计算机运行" checked={draft.settings.wakeToRun} onCheckedChange={(checked) => updateSetting("wakeToRun", checked)} />
-              </div>
+              <FieldGroup className="min-w-0 gap-4">
+                <div className="overflow-hidden rounded-lg border">
+                  <SwitchRow label="使用电池时不启动" checked={draft.settings.disallowStartIfOnBatteries} onCheckedChange={(checked) => updateSetting("disallowStartIfOnBatteries", checked)} />
+                  <SwitchRow label="切换到电池时停止" checked={draft.settings.stopIfGoingOnBatteries} onCheckedChange={(checked) => updateSetting("stopIfGoingOnBatteries", checked)} />
+                  <SwitchRow label="仅网络可用时运行" checked={draft.settings.runOnlyIfNetworkAvailable} onCheckedChange={(checked) => updateSetting("runOnlyIfNetworkAvailable", checked)} />
+                  <SwitchRow label="唤醒计算机运行" checked={draft.settings.wakeToRun} onCheckedChange={(checked) => updateSetting("wakeToRun", checked)} />
+                </div>
+
+                <div className="overflow-hidden rounded-lg border">
+                  <SwitchRow label="仅计算机空闲时运行" checked={draft.settings.runOnlyIfIdle} onCheckedChange={(checked) => updateSetting("runOnlyIfIdle", checked)} />
+                  <FieldGroup className="grid min-w-0 grid-cols-1 gap-4 border-b p-3 md:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="task-idle-duration">空闲持续时间</FieldLabel>
+                      <DurationInput
+                        id="task-idle-duration"
+                        value={draft.settings.idleDuration}
+                        zeroUnit="minutes"
+                        minimumSeconds={60}
+                        disabled={!draft.settings.runOnlyIfIdle}
+                        onChange={(value) => updateSetting("idleDuration", value)}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="task-idle-wait-timeout">等待空闲时间</FieldLabel>
+                      <DurationInput
+                        id="task-idle-wait-timeout"
+                        value={draft.settings.idleWaitTimeout}
+                        zeroUnit="hours"
+                        minimumSeconds={60}
+                        disabled={!draft.settings.runOnlyIfIdle}
+                        onChange={(value) => updateSetting("idleWaitTimeout", value)}
+                      />
+                    </Field>
+                  </FieldGroup>
+                  <SwitchRow label="空闲结束时停止" checked={draft.settings.stopOnIdleEnd} disabled={!draft.settings.runOnlyIfIdle} onCheckedChange={(checked) => updateSetting("stopOnIdleEnd", checked)} />
+                  <SwitchRow label="再次空闲时重新启动" checked={draft.settings.restartOnIdle} disabled={!draft.settings.runOnlyIfIdle} onCheckedChange={(checked) => updateSetting("restartOnIdle", checked)} />
+                </div>
+              </FieldGroup>
             </TabsContent>
 
             <TabsContent value="settings" className="m-0 px-1 py-2">
@@ -496,27 +588,71 @@ export function ScheduledTaskEditorDialog({
                     />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="task-priority">优先级</FieldLabel>
-                    <Input id="task-priority" type="number" min={0} max={10} value={draft.settings.priority} onChange={(event) => updateSetting("priority", Number(event.target.value))} />
+                    <div className="flex min-w-0 items-center justify-between gap-3">
+                      <FieldLabel htmlFor="task-delete-expired-after">无后续计划后删除</FieldLabel>
+                      <Switch
+                        size="sm"
+                        aria-label="无后续计划后删除"
+                        checked={Boolean(draft.settings.deleteExpiredTaskAfter)}
+                        onCheckedChange={(checked) => updateSetting("deleteExpiredTaskAfter", checked ? "P30D" : "")}
+                      />
+                    </div>
+                    <DurationInput
+                      id="task-delete-expired-after"
+                      value={draft.settings.deleteExpiredTaskAfter || "P30D"}
+                      zeroUnit="days"
+                      disabled={!draft.settings.deleteExpiredTaskAfter}
+                      onChange={(value) => updateSetting("deleteExpiredTaskAfter", value)}
+                    />
                   </Field>
                 </FieldGroup>
 
-                <FieldGroup className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="task-restart-interval">失败重启间隔</FieldLabel>
-                    <DurationInput
-                      id="task-restart-interval"
-                      value={draft.settings.restartInterval}
-                      zeroUnit="minutes"
-                      disabled={draft.settings.restartCount === 0}
-                      onChange={(value) => updateSetting("restartInterval", value)}
+                <Field>
+                  <div className="flex min-w-0 items-center justify-between gap-3">
+                    <FieldLabel>失败时重新启动</FieldLabel>
+                    <Switch
+                      size="sm"
+                      aria-label="失败时重新启动"
+                      checked={draft.settings.restartCount > 0}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          updateSetting("restartCount", restartCountPreset || 3)
+                        } else {
+                          if (draft.settings.restartCount > 0) setRestartCountPreset(draft.settings.restartCount)
+                          updateSetting("restartCount", 0)
+                        }
+                      }}
                     />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="task-restart-count">失败重启次数</FieldLabel>
-                    <Input id="task-restart-count" type="number" min={0} max={255} value={draft.settings.restartCount} onChange={(event) => updateSetting("restartCount", Number(event.target.value))} />
-                  </Field>
-                </FieldGroup>
+                  </div>
+                  <FieldGroup className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="task-restart-interval">失败重启间隔</FieldLabel>
+                      <DurationInput
+                        id="task-restart-interval"
+                        value={draft.settings.restartInterval}
+                        zeroUnit="minutes"
+                        disabled={draft.settings.restartCount === 0}
+                        onChange={(value) => updateSetting("restartInterval", value)}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="task-restart-count">失败重启次数</FieldLabel>
+                      <Input
+                        id="task-restart-count"
+                        type="number"
+                        min={1}
+                        max={255}
+                        disabled={draft.settings.restartCount === 0}
+                        value={draft.settings.restartCount || restartCountPreset}
+                        onChange={(event) => {
+                          const value = Number(event.target.value)
+                          setRestartCountPreset(value)
+                          updateSetting("restartCount", value)
+                        }}
+                      />
+                    </Field>
+                  </FieldGroup>
+                </Field>
               </FieldGroup>
             </TabsContent>
           </ScrollArea>
@@ -540,14 +676,15 @@ type SwitchRowProps = {
   checked: boolean
   icon?: ReactNode
   separated?: boolean
+  disabled?: boolean
   onCheckedChange: (checked: boolean) => void
 }
 
-function SwitchRow({ label, checked, icon, separated = true, onCheckedChange }: SwitchRowProps) {
+function SwitchRow({ label, checked, icon, separated = true, disabled = false, onCheckedChange }: SwitchRowProps) {
   return (
-    <label className={`flex min-h-9 min-w-0 cursor-pointer items-center justify-between gap-3 px-3 text-sm transition-colors hover:bg-muted/30 ${separated ? "border-b last:border-b-0" : "rounded-lg border"}`}>
+    <label className={`flex min-h-9 min-w-0 items-center justify-between gap-3 px-3 text-sm transition-colors ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-muted/30"} ${separated ? "border-b last:border-b-0" : "rounded-lg border"}`}>
       <span className="flex min-w-0 items-center gap-2">{icon}<span>{label}</span></span>
-      <Switch size="sm" checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch size="sm" checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
     </label>
   )
 }
@@ -558,10 +695,11 @@ type DurationInputProps = {
   zeroUnit: DurationUnit
   unlimited?: boolean
   disabled?: boolean
+  minimumSeconds?: number
   onChange: (value: string) => void
 }
 
-function DurationInput({ id, value, zeroUnit, unlimited = false, disabled = false, onChange }: DurationInputProps) {
+function DurationInput({ id, value, zeroUnit, unlimited = false, disabled = false, minimumSeconds = 0, onChange }: DurationInputProps) {
   const duration = durationInputValue(value, zeroUnit)
   const hasAmount = duration.amount !== ""
 
@@ -581,7 +719,11 @@ function DurationInput({ id, value, zeroUnit, unlimited = false, disabled = fals
             return
           }
           const amount = Number(event.target.value)
-          if (Number.isFinite(amount) && amount >= 0) onChange(formatTaskDuration(amount, duration.unit))
+          if (Number.isFinite(amount) && amount >= 0) {
+            const next = formatTaskDuration(amount, duration.unit)
+            const seconds = parseTaskDurationSeconds(next)
+            if (seconds !== null && seconds >= minimumSeconds) onChange(next)
+          }
         }}
       />
       {hasAmount ? (
@@ -623,6 +765,12 @@ function compatibilityOptions(current: number): Array<{ value: string; label: st
   if (!options.some((option) => option.value === currentValue)) {
     options.push({ value: currentValue, label: `兼容级别 ${current}` })
   }
+  return options
+}
+
+function logonModeOptions(current: number): Array<{ value: string; label: string }> {
+  const options = [...LOGON_MODES]
+  if (current === 5) options.push({ value: "5", label: "服务账户" })
   return options
 }
 

@@ -6,6 +6,7 @@ import {
   FolderIcon,
   FolderOpenIcon,
   FolderPlusIcon,
+  HistoryIcon,
   LoaderCircleIcon,
   PencilIcon,
   PlayIcon,
@@ -21,6 +22,7 @@ import {
   ScheduledTaskService,
   ScheduledTaskTemplateService,
   type ScheduledTaskEdit,
+  type ScheduledTaskHistoryEvent,
   type ScheduledTaskSummary,
   type ScheduledTaskTemplate,
 } from "../../../bindings/win-admin"
@@ -56,6 +58,8 @@ import {
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { Switch } from "@/components/ui/switch"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { TruncatedText } from "@/components/ui/truncated-text"
 import { showError, showErrorMessage } from "@/lib/error-toast"
 import { ScheduledTaskEditorDialog } from "./scheduled-task-editor-dialog"
@@ -102,6 +106,12 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
   const [folderSaving, setFolderSaving] = useState(false)
   const [deleteFolder, setDeleteFolder] = useState<TaskTreeNode | null>(null)
   const [deleteFolderOpen, setDeleteFolderOpen] = useState(false)
+  const [historyEnabled, setHistoryEnabled] = useState<boolean | null>(null)
+  const [historyStatusLoading, setHistoryStatusLoading] = useState(true)
+  const [historyTask, setHistoryTask] = useState<ScheduledTaskSummary | null>(null)
+  const [historyEvents, setHistoryEvents] = useState<ScheduledTaskHistoryEvent[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const hasLoadedRef = useRef(false)
 
   const load = useCallback(async (silent = false) => {
@@ -121,10 +131,22 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
     }
   }, [])
 
+  const loadHistoryStatus = useCallback(async () => {
+    setHistoryStatusLoading(true)
+    try {
+      setHistoryEnabled(await ScheduledTaskService.HistoryEnabled())
+    } catch (reason) {
+      showError(reason, "无法读取任务历史状态")
+    } finally {
+      setHistoryStatusLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (!active) return
     void load(hasLoadedRef.current)
-  }, [active, load])
+    void loadHistoryStatus()
+  }, [active, load, loadHistoryStatus])
 
   const taskTree = useMemo(() => {
     const keyword = query.trim().toLowerCase()
@@ -212,13 +234,13 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
     }
   }
 
-  const save = async (task: ScheduledTaskEdit, oldPath: string) => {
+  const save = async (task: ScheduledTaskEdit, oldPath: string, password: string) => {
     if (editorMode === "template" && editingTemplate) {
       await ScheduledTaskTemplateService.Save({ ...editingTemplate, name: templateEditorName.trim(), task })
       setTemplateRefreshKey((current) => current + 1)
       return
     }
-    await ScheduledTaskService.Save({ previousPath: oldPath, task })
+    await ScheduledTaskService.Save({ previousPath: oldPath, task, password })
     await load(tasks.length > 0)
   }
 
@@ -359,6 +381,35 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
     }
   }
 
+  const toggleHistory = async (enabled: boolean) => {
+    const previous = historyEnabled
+    setHistoryEnabled(enabled)
+    setHistoryStatusLoading(true)
+    try {
+      await ScheduledTaskService.SetHistoryEnabled(enabled)
+      setHistoryEnabled(await ScheduledTaskService.HistoryEnabled())
+    } catch (reason) {
+      setHistoryEnabled(previous)
+      showError(reason, "无法修改任务历史状态")
+    } finally {
+      setHistoryStatusLoading(false)
+    }
+  }
+
+  const openHistory = async (task: ScheduledTaskSummary) => {
+    setHistoryTask(task)
+    setHistoryEvents([])
+    setHistoryOpen(true)
+    setHistoryLoading(true)
+    try {
+      setHistoryEvents((await ScheduledTaskService.History(task.path, 100)) ?? [])
+    } catch (reason) {
+      showError(reason, "无法读取任务历史")
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col p-4 lg:p-6">
       <div className="flex shrink-0 flex-col gap-3">
@@ -368,6 +419,23 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
             <h1 className="min-w-0 text-xl font-semibold tracking-tight">计划任务</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+            <label className="flex h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm">
+              <HistoryIcon className="size-4" />
+              任务历史
+              {historyEnabled === null ? (
+                <span className="flex h-[14px] w-6 items-center justify-center text-muted-foreground" aria-label="正在读取任务历史状态">
+                  {historyStatusLoading ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : "—"}
+                </span>
+              ) : (
+                <Switch
+                  size="sm"
+                  aria-label="任务历史"
+                  checked={historyEnabled}
+                  disabled={historyStatusLoading}
+                  onCheckedChange={(checked) => void toggleHistory(checked)}
+                />
+              )}
+            </label>
             <Button variant="outline" onClick={() => void load(tasks.length > 0)} disabled={loading}>
               <RefreshCwIcon data-icon="inline-start" />
               刷新
@@ -421,6 +489,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
               onEdit={(task) => void openEdit(task)}
               onRun={(task) => void run(task)}
               onStop={(task) => void stop(task)}
+              onHistory={(task) => void openHistory(task)}
               onExportXML={(task) => void exportXML(task)}
               onEnabledChange={(task, enabled) => void toggleEnabled(task, enabled)}
               onSaveTemplate={(task) => void beginSaveTemplate(task)}
@@ -546,6 +615,60 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
       </Dialog>
 
       <Dialog
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onOpenChangeComplete={(open) => {
+          if (open) return
+          setHistoryTask(null)
+          setHistoryEvents([])
+        }}
+      >
+        <DialogContent className="flex h-[min(680px,calc(100vh-2rem))] !w-[min(92vw,64rem)] min-w-0 !max-w-none flex-col overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>任务历史{historyTask ? ` · ${historyTask.name}` : ""}</DialogTitle>
+            <DialogDescription className="min-w-0 truncate">{historyTask?.path}</DialogDescription>
+          </DialogHeader>
+
+          <ScrollArea className="min-h-0 flex-1 rounded-lg border">
+            {historyLoading ? (
+              <div className="flex min-h-40 items-center justify-center" aria-label="加载历史记录">
+                <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : historyEvents.length ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-36">时间</TableHead>
+                    <TableHead className="w-20">事件 ID</TableHead>
+                    <TableHead>事件</TableHead>
+                    <TableHead className="w-32">结果</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {historyEvents.map((event) => (
+                    <TableRow key={event.recordId}>
+                      <TableCell className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{formatHistoryDateTime(event.timestamp)}</TableCell>
+                      <TableCell className="font-mono text-xs">{event.eventId}</TableCell>
+                      <TableCell>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="font-medium">{event.message}</span>
+                          {historyLevelLabel(event.level) ? <Badge variant="outline">{historyLevelLabel(event.level)}</Badge> : null}
+                        </div>
+                        {event.details ? <div className="mt-0.5 break-all text-xs text-muted-foreground">{event.details}</div> : null}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{event.resultCode || "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">没有该任务的历史记录</div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={deleteTaskOpen}
         onOpenChange={setDeleteTaskOpen}
         onOpenChangeComplete={(open) => !open && setDeleteTask(null)}
@@ -578,6 +701,7 @@ type TaskTreeProps = {
   onEdit: (task: ScheduledTaskSummary) => void
   onRun: (task: ScheduledTaskSummary) => void
   onStop: (task: ScheduledTaskSummary) => void
+  onHistory: (task: ScheduledTaskSummary) => void
   onExportXML: (task: ScheduledTaskSummary) => void
   onEnabledChange: (task: ScheduledTaskSummary, enabled: boolean) => void
   onSaveTemplate: (task: ScheduledTaskSummary) => void
@@ -597,6 +721,7 @@ function TaskTree({
   onEdit,
   onRun,
   onStop,
+  onHistory,
   onExportXML,
   onEnabledChange,
   onSaveTemplate,
@@ -650,6 +775,7 @@ function TaskTree({
                 onEdit={onEdit}
                 onRun={onRun}
                 onStop={onStop}
+                onHistory={onHistory}
                 onExportXML={onExportXML}
                 onEnabledChange={onEnabledChange}
                 onSaveTemplate={onSaveTemplate}
@@ -673,6 +799,7 @@ function TaskTree({
           onEdit={() => onEdit(task)}
           onRun={() => onRun(task)}
           onStop={() => onStop(task)}
+          onHistory={() => onHistory(task)}
           onExportXML={() => onExportXML(task)}
           onEnabledChange={(enabled) => onEnabledChange(task, enabled)}
           onSaveTemplate={() => onSaveTemplate(task)}
@@ -691,6 +818,7 @@ type TaskRowProps = {
   onEdit: () => void
   onRun: () => void
   onStop: () => void
+  onHistory: () => void
   onExportXML: () => void
   onEnabledChange: (enabled: boolean) => void
   onSaveTemplate: () => void
@@ -705,6 +833,7 @@ function TaskRow({
   onEdit,
   onRun,
   onStop,
+  onHistory,
   onExportXML,
   onEnabledChange,
   onSaveTemplate,
@@ -750,6 +879,10 @@ function TaskRow({
         <ContextMenuItem onClick={onEdit} disabled={editing || running}>
           <PencilIcon />
           编辑
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onHistory}>
+          <HistoryIcon />
+          历史记录
         </ContextMenuItem>
         <ContextMenuItem onClick={onExportXML} disabled={running}>
           <FileDownIcon />
@@ -827,5 +960,26 @@ function toggleSetValue(current: Set<string>, value: string): Set<string> {
   if (next.has(value)) next.delete(value)
   else next.add(value)
   return next
+}
+
+function formatHistoryDateTime(value: string): string {
+  if (!value) return "—"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const pad = (part: number) => String(part).padStart(2, "0")
+  return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+function historyLevelLabel(level: number): string {
+  switch (level) {
+    case 1:
+      return "关键"
+    case 2:
+      return "错误"
+    case 3:
+      return "警告"
+    default:
+      return ""
+  }
 }
 

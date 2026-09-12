@@ -80,6 +80,7 @@ export interface SaveMenuRequest {
 export interface SaveScheduledTaskRequest {
     "previousPath": string;
     "task": ScheduledTaskEdit;
+    "password": string;
 }
 
 export interface ScheduledTaskAction {
@@ -102,10 +103,21 @@ export interface ScheduledTaskEdit {
     "description": string;
     "enabled": boolean;
     "userId": string;
+    "logonType": number;
     "runLevel": string;
     "action": ScheduledTaskAction;
     "trigger": ScheduledTaskTrigger;
     "settings": ScheduledTaskSettings;
+}
+
+export interface ScheduledTaskHistoryEvent {
+    "recordId": number;
+    "timestamp": string;
+    "eventId": number;
+    "level": number;
+    "message": string;
+    "resultCode": string;
+    "details": string;
 }
 
 export interface ScheduledTaskSettings {
@@ -116,6 +128,8 @@ export interface ScheduledTaskSettings {
     "allowHardTerminate": boolean;
     "startWhenAvailable": boolean;
     "runOnlyIfNetworkAvailable": boolean;
+    "idleDuration": string;
+    "idleWaitTimeout": string;
     "stopOnIdleEnd": boolean;
     "restartOnIdle": boolean;
     "allowStartOnDemand": boolean;
@@ -125,6 +139,7 @@ export interface ScheduledTaskSettings {
     "useUnifiedSchedulingEngine": boolean;
     "wakeToRun": boolean;
     "executionTimeLimit": string;
+    "deleteExpiredTaskAfter": string;
     "priority": number;
     "restartInterval": string;
     "restartCount": number;

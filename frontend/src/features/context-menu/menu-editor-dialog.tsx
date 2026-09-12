@@ -4,9 +4,11 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   FileCode2Icon,
+  FileImageIcon,
   FolderIcon,
   FolderOpenIcon,
   FolderTreeIcon,
+  PencilIcon,
   PlusIcon,
   SaveIcon,
   SparklesIcon,
@@ -52,6 +54,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { showError, showErrorMessage } from "@/lib/error-toast"
 import { MenuIconPreview } from "./menu-icon-preview"
@@ -284,17 +287,31 @@ function IconField({ icon, command, kind, onChange }: IconFieldProps) {
           />
           <InputGroupAddon align="inline-end">
             {kind === "command" ? (
-              <InputGroupButton
-                onClick={() => void infer()}
-                disabled={!command.trim()}
-                aria-label="推断图标"
-              >
-                <SparklesIcon />
-              </InputGroupButton>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <InputGroupButton
+                      onClick={() => void infer()}
+                      disabled={!command.trim()}
+                      aria-label="推断图标"
+                    >
+                      <SparklesIcon />
+                    </InputGroupButton>
+                  }
+                />
+                <TooltipContent>根据命令自动推断图标</TooltipContent>
+              </Tooltip>
             ) : null}
-			<InputGroupButton onClick={() => void pick()} aria-label="选择图标">
-              <FolderOpenIcon />
-            </InputGroupButton>
+			<Tooltip>
+              <TooltipTrigger
+                render={
+                  <InputGroupButton onClick={() => void pick()} aria-label="选择图标文件">
+                    <FileImageIcon />
+                  </InputGroupButton>
+                }
+              />
+              <TooltipContent>选择图标文件</TooltipContent>
+            </Tooltip>
           </InputGroupAddon>
         </InputGroup>
       </div>
@@ -493,14 +510,15 @@ function TreeNodeRow({
       <ContextMenuTrigger
         className={cn(
           "group flex h-7 min-w-0 items-center gap-1 rounded-md pr-1 text-sm select-none transition-colors",
-          selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/70"
+          selected
+            ? "bg-accent text-accent-foreground data-popup-open:bg-accent"
+            : "hover:bg-accent/70 data-popup-open:bg-accent/70"
         )}
         style={{ paddingLeft: `${depth * 16 + 4}px` }}
         onClick={() => {
           onSelect(path)
           if (isSubmenu) onToggle(path)
         }}
-        onContextMenu={() => onSelect(path)}
       >
         <div className="flex size-5 shrink-0 items-center justify-center">
           {isSubmenu ? (
@@ -529,6 +547,7 @@ function TreeNodeRow({
             type="button"
             variant="ghost"
             size="icon-xs"
+            className="hover:bg-foreground/10"
             aria-label="删除"
             onClick={(event) => {
               event.stopPropagation()
@@ -541,8 +560,17 @@ function TreeNodeRow({
       </ContextMenuTrigger>
 
       <ContextMenuContent>
+        <ContextMenuItem onClick={() => onSelect(path)}>
+          <PencilIcon />
+          编辑
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         {isSubmenu ? (
           <>
+            <ContextMenuItem onClick={() => onAdd(path, "command")}>
+              <FileCode2Icon />
+              添加命令
+            </ContextMenuItem>
             <ContextMenuItem onClick={() => onAdd(path, "submenu")}>
               <FolderTreeIcon />
               添加子菜单
@@ -642,8 +670,9 @@ function AddNodeMenu({ onAdd, label, compact = false, onTriggerClick }: AddNodeM
         render={
           <Button
             type="button"
-            variant={compact ? "ghost" : "outline"}
-            size={compact ? "icon-xs" : "sm"}
+            variant="ghost"
+            size={compact ? "icon-xs" : label ? "sm" : "icon-sm"}
+            className={compact ? "hover:bg-foreground/10 aria-expanded:bg-foreground/10 data-popup-open:bg-foreground/10" : undefined}
             aria-label={label ?? "添加子项"}
             onClick={onTriggerClick}
           >

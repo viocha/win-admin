@@ -16,6 +16,16 @@ type ScheduledTaskSummary struct {
 	LastResult  int32  `json:"lastResult"`
 }
 
+type ScheduledTaskHistoryEvent struct {
+	RecordID   uint64 `json:"recordId"`
+	Timestamp  string `json:"timestamp"`
+	EventID    int    `json:"eventId"`
+	Level      int    `json:"level"`
+	Message    string `json:"message"`
+	ResultCode string `json:"resultCode"`
+	Details    string `json:"details"`
+}
+
 type ScheduledTaskAction struct {
 	Command          string `json:"command"`
 	Arguments        string `json:"arguments"`
@@ -38,6 +48,8 @@ type ScheduledTaskSettings struct {
 	AllowHardTerminate              bool   `json:"allowHardTerminate"`
 	StartWhenAvailable              bool   `json:"startWhenAvailable"`
 	RunOnlyIfNetworkAvailable       bool   `json:"runOnlyIfNetworkAvailable"`
+	IdleDuration                    string `json:"idleDuration"`
+	IdleWaitTimeout                 string `json:"idleWaitTimeout"`
 	StopOnIdleEnd                   bool   `json:"stopOnIdleEnd"`
 	RestartOnIdle                   bool   `json:"restartOnIdle"`
 	AllowStartOnDemand              bool   `json:"allowStartOnDemand"`
@@ -47,6 +59,7 @@ type ScheduledTaskSettings struct {
 	UseUnifiedSchedulingEngine      bool   `json:"useUnifiedSchedulingEngine"`
 	WakeToRun                       bool   `json:"wakeToRun"`
 	ExecutionTimeLimit              string `json:"executionTimeLimit"`
+	DeleteExpiredTaskAfter          string `json:"deleteExpiredTaskAfter"`
 	Priority                        int    `json:"priority"`
 	RestartInterval                 string `json:"restartInterval"`
 	RestartCount                    int    `json:"restartCount"`
@@ -58,6 +71,7 @@ type ScheduledTaskEdit struct {
 	Description string                `json:"description"`
 	Enabled     bool                  `json:"enabled"`
 	UserID      string                `json:"userId"`
+	LogonType   int                   `json:"logonType"`
 	RunLevel    string                `json:"runLevel"`
 	Action      ScheduledTaskAction   `json:"action"`
 	Trigger     ScheduledTaskTrigger  `json:"trigger"`
@@ -75,4 +89,5 @@ type ScheduledTaskDetails struct {
 type SaveScheduledTaskRequest struct {
 	PreviousPath string            `json:"previousPath"`
 	Task         ScheduledTaskEdit `json:"task"`
+	Password     string            `json:"password"`
 }

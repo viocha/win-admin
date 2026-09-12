@@ -28,6 +28,7 @@ export type {
     ScheduledTaskAction,
     ScheduledTaskDetails,
     ScheduledTaskEdit,
+    ScheduledTaskHistoryEvent,
     ScheduledTaskSettings,
     ScheduledTaskSummary,
     ScheduledTaskTemplate,

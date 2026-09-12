@@ -3,9 +3,11 @@
 package main
 
 import (
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
@@ -13,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	ole "github.com/go-ole/go-ole"
@@ -31,11 +34,14 @@ const (
 	taskTriggerLogon           = 9
 	taskLogonNone              = 0
 	taskLogonPassword          = 1
+	taskLogonS4U               = 2
 	taskLogonInteractiveToken  = 3
+	taskLogonGroup             = 4
 	taskLogonServiceAccount    = 5
 	taskLogonInteractiveOrPass = 6
 	taskRunLevelHighest        = 1
 	defaultScheduledTaskFolder = `\`
+	taskHistoryLog             = "Microsoft-Windows-TaskScheduler/Operational"
 )
 
 var weekdayBits = map[string]int{
@@ -92,6 +98,195 @@ func (s *ScheduledTaskService) ListFolders() ([]string, error) {
 		})
 		return paths, nil
 	})
+}
+
+func (s *ScheduledTaskService) HistoryEnabled() (bool, error) {
+	output, err := runTaskHistoryCommand("gl", taskHistoryLog)
+	if err != nil {
+		return false, fmt.Errorf("读取任务历史状态失败: %w", err)
+	}
+	match := regexp.MustCompile(`(?mi)^enabled:\s*(true|false)\s*$`).FindStringSubmatch(string(output))
+	if len(match) != 2 {
+		return false, errors.New("无法识别任务历史状态")
+	}
+	return strings.EqualFold(match[1], "true"), nil
+}
+
+func (s *ScheduledTaskService) SetHistoryEnabled(enabled bool) error {
+	value := "false"
+	if enabled {
+		value = "true"
+	}
+	if _, err := runTaskHistoryCommand("sl", taskHistoryLog, "/e:"+value); err != nil {
+		return fmt.Errorf("修改任务历史状态失败: %w", err)
+	}
+	return nil
+}
+
+func (s *ScheduledTaskService) History(taskPath string, limit int) ([]ScheduledTaskHistoryEvent, error) {
+	taskPath = normalizeTaskPath(taskPath)
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query := "*[EventData[Data[@Name='TaskName']=" + taskHistoryXPathLiteral(taskPath) + "]]"
+	output, err := runTaskHistoryCommand(
+		"qe", taskHistoryLog,
+		"/q:"+query,
+		"/c:"+strconv.Itoa(limit),
+		"/rd:true",
+		"/f:xml",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("读取任务历史失败: %w", err)
+	}
+	return parseScheduledTaskHistory(output)
+}
+
+func runTaskHistoryCommand(args ...string) ([]byte, error) {
+	command := exec.Command("wevtutil.exe", args...)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	output, err := command.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message != "" {
+			return nil, errors.New(message)
+		}
+		return nil, err
+	}
+	return output, nil
+}
+
+func taskHistoryXPathLiteral(value string) string {
+	if !strings.Contains(value, "'") {
+		return "'" + value + "'"
+	}
+	if !strings.Contains(value, `"`) {
+		return `"` + value + `"`
+	}
+	parts := strings.Split(value, "'")
+	quoted := make([]string, 0, len(parts)*2-1)
+	for index, part := range parts {
+		if index > 0 {
+			quoted = append(quoted, `"'"`)
+		}
+		quoted = append(quoted, "'"+part+"'")
+	}
+	return "concat(" + strings.Join(quoted, ",") + ")"
+}
+
+type scheduledTaskHistoryXML struct {
+	Events []struct {
+		System struct {
+			EventID  int    `xml:"EventID"`
+			Level    int    `xml:"Level"`
+			RecordID uint64 `xml:"EventRecordID"`
+			Created  struct {
+				SystemTime string `xml:"SystemTime,attr"`
+			} `xml:"TimeCreated"`
+		} `xml:"System"`
+		EventData struct {
+			Name string `xml:"Name,attr"`
+			Data []struct {
+				Name  string `xml:"Name,attr"`
+				Value string `xml:",chardata"`
+			} `xml:"Data"`
+		} `xml:"EventData"`
+	} `xml:"Event"`
+}
+
+func parseScheduledTaskHistory(data []byte) ([]ScheduledTaskHistoryEvent, error) {
+	if strings.TrimSpace(string(data)) == "" {
+		return []ScheduledTaskHistoryEvent{}, nil
+	}
+	wrapped := append([]byte("<Events>"), data...)
+	wrapped = append(wrapped, []byte("</Events>")...)
+	var document scheduledTaskHistoryXML
+	if err := xml.Unmarshal(wrapped, &document); err != nil {
+		return nil, fmt.Errorf("解析任务历史失败: %w", err)
+	}
+
+	result := make([]ScheduledTaskHistoryEvent, 0, len(document.Events))
+	for _, source := range document.Events {
+		values := make(map[string]string, len(source.EventData.Data))
+		for _, item := range source.EventData.Data {
+			values[item.Name] = strings.TrimSpace(item.Value)
+		}
+		timestamp := source.System.Created.SystemTime
+		if parsed, err := time.Parse(time.RFC3339Nano, timestamp); err == nil {
+			timestamp = parsed.Local().Format(time.RFC3339)
+		}
+		result = append(result, ScheduledTaskHistoryEvent{
+			RecordID:   source.System.RecordID,
+			Timestamp:  timestamp,
+			EventID:    source.System.EventID,
+			Level:      source.System.Level,
+			Message:    scheduledTaskHistoryMessage(source.System.EventID, source.EventData.Name),
+			ResultCode: scheduledTaskHistoryResultCode(values["ResultCode"]),
+			Details:    scheduledTaskHistoryDetails(values),
+		})
+	}
+	return result, nil
+}
+
+func scheduledTaskHistoryMessage(eventID int, eventName string) string {
+	labels := map[int]string{
+		100: "任务已启动",
+		101: "任务启动失败",
+		102: "任务已完成",
+		107: "触发器已触发",
+		110: "用户启动任务",
+		111: "任务已终止",
+		129: "已创建任务进程",
+		200: "操作已启动",
+		201: "操作已完成",
+		202: "操作失败",
+	}
+	if label := labels[eventID]; label != "" {
+		return label
+	}
+	if eventName != "" {
+		return eventName
+	}
+	return fmt.Sprintf("事件 %d", eventID)
+}
+
+func scheduledTaskHistoryResultCode(value string) string {
+	if value == "" {
+		return ""
+	}
+	number, err := strconv.ParseUint(value, 0, 32)
+	if err != nil {
+		return value
+	}
+	return fmt.Sprintf("0x%08X", uint32(number))
+}
+
+func scheduledTaskHistoryDetails(values map[string]string) string {
+	keys := []struct {
+		name  string
+		label string
+	}{
+		{"UserContext", "用户"},
+		{"ActionName", "操作"},
+		{"InstanceId", "实例"},
+		{"TaskInstanceId", "实例"},
+		{"EnginePID", "PID"},
+		{"ProcessId", "进程"},
+	}
+	details := make([]string, 0, len(keys))
+	seen := make(map[string]bool)
+	for _, key := range keys {
+		value := values[key.name]
+		if value == "" || seen[key.label+value] {
+			continue
+		}
+		seen[key.label+value] = true
+		details = append(details, key.label+": "+value)
+	}
+	return strings.Join(details, " · ")
 }
 
 func (s *ScheduledTaskService) CreateFolder(folderPath string) error {
@@ -339,15 +534,20 @@ func (s *ScheduledTaskService) Save(request SaveScheduledTaskRequest) (Scheduled
 			}
 		}
 
+		registerUserID, registerPassword, registerLogonType, credentialErr := scheduledTaskRegistrationCredentials(edit, request.Password)
+		if credentialErr != nil {
+			return ScheduledTaskDetails{}, credentialErr
+		}
+
 		registeredVariant, registerErr := oleutil.CallMethod(
 			folder,
 			"RegisterTaskDefinition",
 			edit.Name,
 			definition,
 			taskCreateOrUpdate,
-			nil,
-			nil,
-			taskLogonNone,
+			registerUserID,
+			registerPassword,
+			registerLogonType,
 			nil,
 		)
 		if registerErr != nil {
@@ -810,12 +1010,13 @@ func readScheduledTaskEdit(definition *ole.IDispatch, summary ScheduledTaskSumma
 	}
 	logonType := getDispatchInt(principal, "LogonType")
 	edit.UserID = getDispatchString(principal, "UserId")
+	edit.LogonType = logonType
 	if getDispatchInt(principal, "RunLevel") == taskRunLevelHighest {
 		edit.RunLevel = "highest"
 	}
 	principal.Release()
-	if logonType == taskLogonPassword || logonType == taskLogonInteractiveOrPass {
-		return edit, false, "此任务使用密码凭据，结构化编辑需要重新提供密码", managed, nil
+	if logonType == taskLogonGroup || logonType == taskLogonInteractiveOrPass || logonType == taskLogonNone {
+		return edit, false, "此任务使用当前编辑器尚未支持的登录方式", managed, nil
 	}
 
 	settingsVariant, settingsErr := oleutil.GetProperty(definition, "Settings")
@@ -1006,10 +1207,10 @@ func applyScheduledTaskEdit(definition *ole.IDispatch, edit ScheduledTaskEdit) e
 			principal.Release()
 			return schedulerError("修改运行账户失败", err)
 		}
-		if err := putDispatchProperty(principal, "LogonType", taskLogonInteractiveToken); err != nil {
-			principal.Release()
-			return schedulerError("修改登录方式失败", err)
-		}
+	}
+	if err := putDispatchProperty(principal, "LogonType", edit.LogonType); err != nil {
+		principal.Release()
+		return schedulerError("修改登录方式失败", err)
 	}
 	principal.Release()
 
@@ -1149,6 +1350,14 @@ func validateScheduledTaskEdit(edit ScheduledTaskEdit) (ScheduledTaskEdit, error
 	if edit.RunLevel != "highest" {
 		edit.RunLevel = "least"
 	}
+	if edit.LogonType == taskLogonNone {
+		edit.LogonType = taskLogonInteractiveToken
+	}
+	switch edit.LogonType {
+	case taskLogonPassword, taskLogonS4U, taskLogonInteractiveToken, taskLogonServiceAccount:
+	default:
+		return edit, errors.New("任务登录方式无效")
+	}
 	if edit.Trigger.Type == "" {
 		edit.Trigger.Type = "manual"
 	}
@@ -1197,16 +1406,61 @@ func validateScheduledTaskEdit(edit ScheduledTaskEdit) (ScheduledTaskEdit, error
 	return edit, nil
 }
 
+func scheduledTaskRegistrationCredentials(edit ScheduledTaskEdit, password string) (any, any, int, error) {
+	switch edit.LogonType {
+	case taskLogonInteractiveToken:
+		return nil, nil, taskLogonNone, nil
+	case taskLogonPassword:
+		userID, err := scheduledTaskUserID(edit.UserID)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		if password == "" {
+			return nil, nil, 0, errors.New("不管用户是否登录都要运行时需要输入账户密码")
+		}
+		return userID, password, taskLogonPassword, nil
+	case taskLogonS4U:
+		userID, err := scheduledTaskUserID(edit.UserID)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		return userID, nil, taskLogonS4U, nil
+	case taskLogonServiceAccount:
+		userID := strings.TrimSpace(edit.UserID)
+		if userID == "" {
+			return nil, nil, 0, errors.New("服务账户任务缺少运行账户")
+		}
+		return userID, nil, taskLogonServiceAccount, nil
+	default:
+		return nil, nil, 0, errors.New("任务登录方式无效")
+	}
+}
+
+func scheduledTaskUserID(value string) (string, error) {
+	if userID := strings.TrimSpace(value); userID != "" {
+		return userID, nil
+	}
+	current, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("读取当前用户失败: %w", err)
+	}
+	return current.Username, nil
+}
+
 func defaultScheduledTaskSettings() ScheduledTaskSettings {
 	return ScheduledTaskSettings{
-		Compatibility:           6,
+		Compatibility:           4,
 		MultipleInstancesPolicy: "ignoreNew",
 		AllowHardTerminate:      true,
 		StartWhenAvailable:      true,
 		AllowStartOnDemand:      true,
+		IdleDuration:            "PT10M",
+		IdleWaitTimeout:         "PT1H",
 		ExecutionTimeLimit:      "PT0S",
+		DeleteExpiredTaskAfter:  "",
 		Priority:                7,
 		RestartInterval:         "PT1M",
+		RestartCount:            3,
 	}
 }
 
@@ -1226,12 +1480,19 @@ func readScheduledTaskSettings(settings *ole.IDispatch) ScheduledTaskSettings {
 	result.UseUnifiedSchedulingEngine = getDispatchBool(settings, "UseUnifiedSchedulingEngine")
 	result.WakeToRun = getDispatchBool(settings, "WakeToRun")
 	result.ExecutionTimeLimit = getDispatchString(settings, "ExecutionTimeLimit")
+	result.DeleteExpiredTaskAfter = getDispatchString(settings, "DeleteExpiredTaskAfter")
 	result.Priority = getDispatchInt(settings, "Priority")
 
 	idleVariant, idleErr := oleutil.GetProperty(settings, "IdleSettings")
 	if idleErr == nil {
 		idle := idleVariant.ToIDispatch()
 		if idle != nil {
+			if idleDuration := getDispatchString(idle, "IdleDuration"); idleDuration != "" {
+				result.IdleDuration = idleDuration
+			}
+			if waitTimeout := getDispatchString(idle, "WaitTimeout"); waitTimeout != "" {
+				result.IdleWaitTimeout = waitTimeout
+			}
 			result.StopOnIdleEnd = getDispatchBool(idle, "StopOnIdleEnd")
 			result.RestartOnIdle = getDispatchBool(idle, "RestartOnIdle")
 			idle.Release()
@@ -1269,6 +1530,7 @@ func writeScheduledTaskSettings(settings *ole.IDispatch, value ScheduledTaskSett
 		{"UseUnifiedSchedulingEngine", value.UseUnifiedSchedulingEngine},
 		{"WakeToRun", value.WakeToRun},
 		{"ExecutionTimeLimit", value.ExecutionTimeLimit},
+		{"DeleteExpiredTaskAfter", value.DeleteExpiredTaskAfter},
 		{"Priority", value.Priority},
 	}
 	for _, property := range properties {
@@ -1302,6 +1564,12 @@ func writeScheduledTaskSettings(settings *ole.IDispatch, value ScheduledTaskSett
 		return errors.New("任务空闲设置不可用")
 	}
 	defer idle.Release()
+	if err := putDispatchProperty(idle, "IdleDuration", value.IdleDuration); err != nil {
+		return schedulerError("修改空闲持续时间失败", err)
+	}
+	if err := putDispatchProperty(idle, "WaitTimeout", value.IdleWaitTimeout); err != nil {
+		return schedulerError("修改空闲等待时间失败", err)
+	}
 	if err := putDispatchProperty(idle, "StopOnIdleEnd", value.StopOnIdleEnd); err != nil {
 		return schedulerError("修改空闲设置失败", err)
 	}
@@ -1323,9 +1591,32 @@ func normalizeScheduledTaskSettings(value ScheduledTaskSettings) (ScheduledTaskS
 	default:
 		return value, errors.New("多实例策略无效")
 	}
+	value.IdleDuration = strings.TrimSpace(value.IdleDuration)
+	if value.IdleDuration == "" {
+		value.IdleDuration = "PT10M"
+	}
+	idleDurationSeconds, ok := parseTaskSchedulerDurationSeconds(value.IdleDuration)
+	if !ok || idleDurationSeconds < 60 {
+		return value, errors.New("空闲持续时间必须至少为 1 分钟")
+	}
+	value.IdleWaitTimeout = strings.TrimSpace(value.IdleWaitTimeout)
+	if value.IdleWaitTimeout == "" {
+		value.IdleWaitTimeout = "PT1H"
+	}
+	idleWaitSeconds, ok := parseTaskSchedulerDurationSeconds(value.IdleWaitTimeout)
+	if !ok || idleWaitSeconds < 60 {
+		return value, errors.New("等待空闲时间必须至少为 1 分钟")
+	}
 	value.ExecutionTimeLimit = strings.TrimSpace(value.ExecutionTimeLimit)
 	if value.ExecutionTimeLimit == "" {
 		value.ExecutionTimeLimit = "PT0S"
+	}
+	value.DeleteExpiredTaskAfter = strings.TrimSpace(value.DeleteExpiredTaskAfter)
+	if value.DeleteExpiredTaskAfter != "" {
+		deleteAfterSeconds, ok := parseTaskSchedulerDurationSeconds(value.DeleteExpiredTaskAfter)
+		if !ok || deleteAfterSeconds <= 0 {
+			return value, errors.New("无后续计划删除等待时间无效")
+		}
 	}
 	value.RestartInterval = strings.TrimSpace(value.RestartInterval)
 	if value.RestartInterval == "" {

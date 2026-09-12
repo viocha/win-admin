@@ -30,10 +30,9 @@ export const WEEKDAYS = [
 ] as const
 
 export const TASK_COMPATIBILITY_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "6", label: "Windows 10" },
+  { value: "4", label: "Windows 10" },
   { value: "3", label: "Windows 7 / Windows Server 2008 R2" },
   { value: "2", label: "Windows Vista / Windows Server 2008" },
-  { value: "1", label: "Windows Server 2003 / Windows XP / Windows 2000" },
 ]
 
 export function createEmptyScheduledTask(): ScheduledTaskEdit {
@@ -43,6 +42,7 @@ export function createEmptyScheduledTask(): ScheduledTaskEdit {
     description: "",
     enabled: true,
     userId: "",
+    logonType: 3,
     runLevel: "highest",
     action: {
       command: "",
@@ -57,13 +57,15 @@ export function createEmptyScheduledTask(): ScheduledTaskEdit {
       userId: "",
     },
     settings: {
-      compatibility: 6,
+      compatibility: 4,
       multipleInstancesPolicy: "ignoreNew",
       disallowStartIfOnBatteries: false,
       stopIfGoingOnBatteries: false,
       allowHardTerminate: true,
       startWhenAvailable: true,
       runOnlyIfNetworkAvailable: false,
+      idleDuration: "PT10M",
+      idleWaitTimeout: "PT1H",
       stopOnIdleEnd: false,
       restartOnIdle: false,
       allowStartOnDemand: true,
@@ -73,19 +75,24 @@ export function createEmptyScheduledTask(): ScheduledTaskEdit {
       useUnifiedSchedulingEngine: false,
       wakeToRun: false,
       executionTimeLimit: "PT0S",
+      deleteExpiredTaskAfter: "",
       priority: 7,
       restartInterval: "PT1M",
-      restartCount: 0,
+      restartCount: 3,
     },
   }
 }
 
 export function cloneScheduledTask(task: ScheduledTaskEdit): ScheduledTaskEdit {
   const clone = structuredClone(task)
+  clone.logonType ||= 3
   clone.trigger.daysOfWeek ??= []
   clone.trigger.interval ||= 1
   clone.trigger.userId ??= ""
   clone.settings ??= createEmptyScheduledTask().settings
+  clone.settings.deleteExpiredTaskAfter ??= ""
+  clone.settings.idleDuration ||= "PT10M"
+  clone.settings.idleWaitTimeout ||= "PT1H"
   return clone
 }
 
@@ -100,6 +107,18 @@ export function validateScheduledTask(task: ScheduledTaskEdit): string {
   }
   if (parseTaskDurationSeconds(task.settings.executionTimeLimit) === null) {
     return "执行时间限制无效"
+  }
+  if (task.settings.deleteExpiredTaskAfter) {
+    const deleteAfterSeconds = parseTaskDurationSeconds(task.settings.deleteExpiredTaskAfter)
+    if (deleteAfterSeconds === null || deleteAfterSeconds <= 0) return "无后续计划删除等待时间无效"
+  }
+  const idleDurationSeconds = parseTaskDurationSeconds(task.settings.idleDuration)
+  if (idleDurationSeconds === null || idleDurationSeconds < 60) {
+    return "空闲持续时间必须至少为 1 分钟"
+  }
+  const idleWaitSeconds = parseTaskDurationSeconds(task.settings.idleWaitTimeout)
+  if (idleWaitSeconds === null || idleWaitSeconds < 60) {
+    return "等待空闲时间必须至少为 1 分钟"
   }
   if (task.settings.restartCount > 0) {
     const restartSeconds = parseTaskDurationSeconds(task.settings.restartInterval)
