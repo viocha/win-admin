@@ -62,7 +62,7 @@ export function createEmptyScheduledTask(): ScheduledTaskEdit {
       hidden: false,
       runOnlyIfIdle: false,
       disallowStartOnRemoteAppSession: false,
-      useUnifiedSchedulingEngine: true,
+      useUnifiedSchedulingEngine: false,
       wakeToRun: false,
       executionTimeLimit: "PT0S",
       priority: 7,
@@ -95,7 +95,11 @@ export function validateScheduledTask(task: ScheduledTaskEdit): string {
   }
   if (task.settings.restartCount > 0) {
     const restartSeconds = parseTaskDurationSeconds(task.settings.restartInterval)
-    if (restartSeconds === null || restartSeconds <= 0) return "失败重启间隔必须大于 0"
+    if (restartSeconds === null) return "失败重启间隔无效"
+    if (restartSeconds < 60 || restartSeconds > 31 * DURATION_UNIT_SECONDS.days) {
+      return "失败重启间隔必须在 1 分钟到 31 天之间"
+    }
+    if (task.settings.restartCount > 255) return "失败重启次数必须在 0 到 255 之间"
   }
   return ""
 }

@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1197,14 +1199,13 @@ func validateScheduledTaskEdit(edit ScheduledTaskEdit) (ScheduledTaskEdit, error
 
 func defaultScheduledTaskSettings() ScheduledTaskSettings {
 	return ScheduledTaskSettings{
-		MultipleInstancesPolicy:    "ignoreNew",
-		AllowHardTerminate:         true,
-		StartWhenAvailable:         true,
-		AllowStartOnDemand:         true,
-		UseUnifiedSchedulingEngine: true,
-		ExecutionTimeLimit:         "PT0S",
-		Priority:                   7,
-		RestartInterval:            "PT1M",
+		MultipleInstancesPolicy: "ignoreNew",
+		AllowHardTerminate:      true,
+		StartWhenAvailable:      true,
+		AllowStartOnDemand:      true,
+		ExecutionTimeLimit:      "PT0S",
+		Priority:                7,
+		RestartInterval:         "PT1M",
 	}
 }
 
@@ -1327,10 +1328,45 @@ func normalizeScheduledTaskSettings(value ScheduledTaskSettings) (ScheduledTaskS
 	if value.Priority < 0 || value.Priority > 10 {
 		return value, errors.New("优先级必须在 0 到 10 之间")
 	}
-	if value.RestartCount < 0 || value.RestartCount > 999 {
-		return value, errors.New("失败重启次数必须在 0 到 999 之间")
+	if value.RestartCount < 0 || value.RestartCount > 255 {
+		return value, errors.New("失败重启次数必须在 0 到 255 之间")
+	}
+	if value.RestartCount > 0 {
+		restartSeconds, ok := parseTaskSchedulerDurationSeconds(value.RestartInterval)
+		if !ok {
+			return value, errors.New("失败重启间隔格式无效")
+		}
+		if restartSeconds < 60 || restartSeconds > 31*24*60*60 {
+			return value, errors.New("失败重启间隔必须在 1 分钟到 31 天之间")
+		}
 	}
 	return value, nil
+}
+
+var taskSchedulerDurationPattern = regexp.MustCompile(`(?i)^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$`)
+
+func parseTaskSchedulerDurationSeconds(value string) (float64, bool) {
+	matches := taskSchedulerDurationPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if matches == nil {
+		return 0, false
+	}
+
+	hasComponent := false
+	total := 0.0
+	multipliers := []float64{24 * 60 * 60, 60 * 60, 60, 1}
+	for index, multiplier := range multipliers {
+		part := matches[index+1]
+		if part == "" {
+			continue
+		}
+		hasComponent = true
+		amount, err := strconv.ParseFloat(part, 64)
+		if err != nil {
+			return 0, false
+		}
+		total += amount * multiplier
+	}
+	return total, hasComponent
 }
 
 func multipleInstancesPolicyName(value int) string {

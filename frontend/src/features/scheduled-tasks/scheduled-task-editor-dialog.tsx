@@ -447,8 +447,6 @@ export function ScheduledTaskEditorDialog({
                   <SwitchRow label="错过计划后尽快运行" checked={draft.settings.startWhenAvailable} onCheckedChange={(checked) => updateSetting("startWhenAvailable", checked)} />
                   <SwitchRow label="允许强制终止" checked={draft.settings.allowHardTerminate} onCheckedChange={(checked) => updateSetting("allowHardTerminate", checked)} />
                   <SwitchRow label="隐藏任务" checked={draft.settings.hidden} onCheckedChange={(checked) => updateSetting("hidden", checked)} />
-                  <SwitchRow label="禁止 RemoteApp 会话启动" checked={draft.settings.disallowStartOnRemoteAppSession} onCheckedChange={(checked) => updateSetting("disallowStartOnRemoteAppSession", checked)} />
-                  <SwitchRow label="统一调度引擎" checked={draft.settings.useUnifiedSchedulingEngine} onCheckedChange={(checked) => updateSetting("useUnifiedSchedulingEngine", checked)} />
                 </div>
 
                 <Field>
@@ -491,7 +489,7 @@ export function ScheduledTaskEditorDialog({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="task-restart-count">失败重启次数</FieldLabel>
-                    <Input id="task-restart-count" type="number" min={0} max={999} value={draft.settings.restartCount} onChange={(event) => updateSetting("restartCount", Number(event.target.value))} />
+                    <Input id="task-restart-count" type="number" min={0} max={255} value={draft.settings.restartCount} onChange={(event) => updateSetting("restartCount", Number(event.target.value))} />
                   </Field>
                 </FieldGroup>
               </FieldGroup>
