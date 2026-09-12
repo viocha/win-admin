@@ -29,6 +29,13 @@ export const WEEKDAYS = [
   { value: "sunday", label: "日" },
 ] as const
 
+export const TASK_COMPATIBILITY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "6", label: "Windows 10" },
+  { value: "3", label: "Windows 7 / Windows Server 2008 R2" },
+  { value: "2", label: "Windows Vista / Windows Server 2008" },
+  { value: "1", label: "Windows Server 2003 / Windows XP / Windows 2000" },
+]
+
 export function createEmptyScheduledTask(): ScheduledTaskEdit {
   return {
     name: "",
@@ -50,6 +57,7 @@ export function createEmptyScheduledTask(): ScheduledTaskEdit {
       userId: "",
     },
     settings: {
+      compatibility: 6,
       multipleInstancesPolicy: "ignoreNew",
       disallowStartIfOnBatteries: false,
       stopIfGoingOnBatteries: false,

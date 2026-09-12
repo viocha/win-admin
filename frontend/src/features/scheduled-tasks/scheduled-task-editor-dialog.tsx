@@ -47,6 +47,7 @@ import {
   defaultStartBoundary,
   formatTaskDuration,
   parseTaskDurationSeconds,
+  TASK_COMPATIBILITY_OPTIONS,
   TRIGGERS,
   type DurationUnit,
   type TriggerType,
@@ -261,6 +262,31 @@ export function ScheduledTaskEditorDialog({
                     className="min-h-24 resize-y"
                   />
                 </Field>
+
+                <FieldGroup className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]">
+                  <div className="overflow-hidden rounded-lg border">
+                    <SwitchRow
+                      label="隐藏"
+                      checked={draft.settings.hidden}
+                      onCheckedChange={(checked) => updateSetting("hidden", checked)}
+                    />
+                  </div>
+                  <Field>
+                    <FieldLabel>配置</FieldLabel>
+                    <Select
+                      items={compatibilityOptions(draft.settings.compatibility)}
+                      value={String(draft.settings.compatibility)}
+                      onValueChange={(value) => value && updateSetting("compatibility", Number(value))}
+                    >
+                      <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent alignItemWithTrigger={false}>
+                        {compatibilityOptions(draft.settings.compatibility).map((option) => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </FieldGroup>
               </FieldGroup>
             </TabsContent>
 
@@ -446,7 +472,6 @@ export function ScheduledTaskEditorDialog({
                   <SwitchRow label="允许按需运行" checked={draft.settings.allowStartOnDemand} onCheckedChange={(checked) => updateSetting("allowStartOnDemand", checked)} />
                   <SwitchRow label="错过计划后尽快运行" checked={draft.settings.startWhenAvailable} onCheckedChange={(checked) => updateSetting("startWhenAvailable", checked)} />
                   <SwitchRow label="允许强制终止" checked={draft.settings.allowHardTerminate} onCheckedChange={(checked) => updateSetting("allowHardTerminate", checked)} />
-                  <SwitchRow label="隐藏任务" checked={draft.settings.hidden} onCheckedChange={(checked) => updateSetting("hidden", checked)} />
                 </div>
 
                 <Field>
@@ -590,6 +615,15 @@ function durationInputValue(value: string, zeroUnit: DurationUnit): { amount: st
     if (seconds % unitSeconds === 0) return { amount: String(seconds / unitSeconds), unit }
   }
   return { amount: String(Math.round(seconds)), unit: "seconds" }
+}
+
+function compatibilityOptions(current: number): Array<{ value: string; label: string }> {
+  const options = [...TASK_COMPATIBILITY_OPTIONS]
+  const currentValue = String(current)
+  if (!options.some((option) => option.value === currentValue)) {
+    options.push({ value: currentValue, label: `兼容级别 ${current}` })
+  }
+  return options
 }
 
 function toDateTimeLocalValue(value: string): string {

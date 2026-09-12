@@ -1199,6 +1199,7 @@ func validateScheduledTaskEdit(edit ScheduledTaskEdit) (ScheduledTaskEdit, error
 
 func defaultScheduledTaskSettings() ScheduledTaskSettings {
 	return ScheduledTaskSettings{
+		Compatibility:           6,
 		MultipleInstancesPolicy: "ignoreNew",
 		AllowHardTerminate:      true,
 		StartWhenAvailable:      true,
@@ -1211,6 +1212,7 @@ func defaultScheduledTaskSettings() ScheduledTaskSettings {
 
 func readScheduledTaskSettings(settings *ole.IDispatch) ScheduledTaskSettings {
 	result := defaultScheduledTaskSettings()
+	result.Compatibility = getDispatchInt(settings, "Compatibility")
 	result.MultipleInstancesPolicy = multipleInstancesPolicyName(getDispatchInt(settings, "MultipleInstances"))
 	result.DisallowStartIfOnBatteries = getDispatchBool(settings, "DisallowStartIfOnBatteries")
 	result.StopIfGoingOnBatteries = getDispatchBool(settings, "StopIfGoingOnBatteries")
@@ -1253,6 +1255,7 @@ func writeScheduledTaskSettings(settings *ole.IDispatch, value ScheduledTaskSett
 		name  string
 		value any
 	}{
+		{"Compatibility", value.Compatibility},
 		{"MultipleInstances", multipleInstancesPolicyValue(value.MultipleInstancesPolicy)},
 		{"DisallowStartIfOnBatteries", value.DisallowStartIfOnBatteries},
 		{"StopIfGoingOnBatteries", value.StopIfGoingOnBatteries},
@@ -1309,6 +1312,9 @@ func writeScheduledTaskSettings(settings *ole.IDispatch, value ScheduledTaskSett
 }
 
 func normalizeScheduledTaskSettings(value ScheduledTaskSettings) (ScheduledTaskSettings, error) {
+	if value.Compatibility < 0 || value.Compatibility > 6 {
+		return value, errors.New("任务兼容级别无效")
+	}
 	if value.MultipleInstancesPolicy == "" {
 		value.MultipleInstancesPolicy = "ignoreNew"
 	}

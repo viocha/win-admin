@@ -31,6 +31,7 @@ type ScheduledTaskTrigger struct {
 }
 
 type ScheduledTaskSettings struct {
+	Compatibility                   int    `json:"compatibility"`
 	MultipleInstancesPolicy         string `json:"multipleInstancesPolicy"`
 	DisallowStartIfOnBatteries      bool   `json:"disallowStartIfOnBatteries"`
 	StopIfGoingOnBatteries          bool   `json:"stopIfGoingOnBatteries"`

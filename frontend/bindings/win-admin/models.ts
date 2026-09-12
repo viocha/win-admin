@@ -109,6 +109,7 @@ export interface ScheduledTaskEdit {
 }
 
 export interface ScheduledTaskSettings {
+    "compatibility": number;
     "multipleInstancesPolicy": string;
     "disallowStartIfOnBatteries": boolean;
     "stopIfGoingOnBatteries": boolean;
