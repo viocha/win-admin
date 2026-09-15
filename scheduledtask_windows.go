@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -42,6 +43,7 @@ const (
 	taskRunLevelHighest        = 1
 	defaultScheduledTaskFolder = `\`
 	taskHistoryLog             = "Microsoft-Windows-TaskScheduler/Operational"
+	scheduledTaskListWorkers   = 8
 )
 
 var weekdayBits = map[string]int{
@@ -59,24 +61,60 @@ var orderedWeekdays = []string{
 }
 
 func (s *ScheduledTaskService) List() ([]ScheduledTaskSummary, error) {
-	return withTaskService(func(service *ole.IDispatch) ([]ScheduledTaskSummary, error) {
-		rootVariant, err := oleutil.CallMethod(service, "GetFolder", `\`)
-		if err != nil {
-			return nil, schedulerError("打开计划任务根目录失败", err)
-		}
-		root := rootVariant.ToIDispatch()
-		if root == nil {
-			return nil, errors.New("无法访问计划任务根目录")
-		}
-		defer root.Release()
+	folders, err := s.ListFolders()
+	if err != nil {
+		return nil, err
+	}
+	folders = append([]string{defaultScheduledTaskFolder}, folders...)
 
-		items := make([]ScheduledTaskSummary, 0, 128)
-		walkScheduledTaskFolder(root, &items)
-		sort.SliceStable(items, func(i, j int) bool {
-			return strings.ToLower(items[i].Path) < strings.ToLower(items[j].Path)
-		})
-		return items, nil
+	workerCount := min(scheduledTaskListWorkers, len(folders))
+	jobs := make(chan string, len(folders))
+	for _, folderPath := range folders {
+		jobs <- folderPath
+	}
+	close(jobs)
+
+	results := make(chan []ScheduledTaskSummary, workerCount)
+	errors := make(chan error, workerCount)
+	var wg sync.WaitGroup
+
+	for range workerCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			items, workerErr := withTaskService(func(service *ole.IDispatch) ([]ScheduledTaskSummary, error) {
+				items := make([]ScheduledTaskSummary, 0, 64)
+				for folderPath := range jobs {
+					items = append(items, readScheduledTaskFolder(service, folderPath)...)
+				}
+				return items, nil
+			})
+			if workerErr != nil {
+				errors <- workerErr
+				return
+			}
+			results <- items
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+	close(errors)
+
+	items := make([]ScheduledTaskSummary, 0, 128)
+	for batch := range results {
+		items = append(items, batch...)
+	}
+	for workerErr := range errors {
+		if workerErr != nil {
+			return nil, workerErr
+		}
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		return strings.ToLower(items[i].Path) < strings.ToLower(items[j].Path)
 	})
+	return items, nil
 }
 
 func (s *ScheduledTaskService) ListFolders() ([]string, error) {
@@ -821,7 +859,18 @@ func withTaskService[T any](fn func(*ole.IDispatch) (T, error)) (T, error) {
 	return fn(service)
 }
 
-func walkScheduledTaskFolder(folder *ole.IDispatch, items *[]ScheduledTaskSummary) {
+func readScheduledTaskFolder(service *ole.IDispatch, folderPath string) []ScheduledTaskSummary {
+	folderVariant, err := oleutil.CallMethod(service, "GetFolder", folderPath)
+	if err != nil {
+		return nil
+	}
+	folder := folderVariant.ToIDispatch()
+	if folder == nil {
+		return nil
+	}
+	defer folder.Release()
+
+	items := make([]ScheduledTaskSummary, 0, 16)
 	tasksVariant, err := oleutil.CallMethod(folder, "GetTasks", taskEnumHidden)
 	if err == nil {
 		tasks := tasksVariant.ToIDispatch()
@@ -836,36 +885,13 @@ func walkScheduledTaskFolder(folder *ole.IDispatch, items *[]ScheduledTaskSummar
 				if task == nil {
 					continue
 				}
-				*items = append(*items, readScheduledTaskSummary(task))
+				items = append(items, readScheduledTaskSummary(task))
 				task.Release()
 			}
 			tasks.Release()
 		}
 	}
-
-	foldersVariant, err := oleutil.CallMethod(folder, "GetFolders", 0)
-	if err != nil {
-		return
-	}
-	folders := foldersVariant.ToIDispatch()
-	if folders == nil {
-		return
-	}
-	defer folders.Release()
-
-	count := getDispatchInt(folders, "Count")
-	for index := 1; index <= count; index++ {
-		itemVariant, itemErr := oleutil.GetProperty(folders, "Item", index)
-		if itemErr != nil {
-			continue
-		}
-		child := itemVariant.ToIDispatch()
-		if child == nil {
-			continue
-		}
-		walkScheduledTaskFolder(child, items)
-		child.Release()
-	}
+	return items
 }
 
 func walkScheduledTaskFolders(folder *ole.IDispatch, paths *[]string) {
