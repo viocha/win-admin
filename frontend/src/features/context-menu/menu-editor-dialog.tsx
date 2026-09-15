@@ -333,6 +333,12 @@ function CommandField({ value, target, onChange }: CommandFieldProps) {
     onChange(suffix)
   }
 
+  const resolveCommand = async () => {
+    if (!value.trim()) return
+    const resolved = await ContextMenuService.ResolveCommand(value)
+    if (resolved && resolved !== value) onChange(resolved)
+  }
+
   return (
     <Field className="min-w-0">
       <div className="flex items-center justify-between gap-3">
@@ -345,6 +351,7 @@ function CommandField({ value, target, onChange }: CommandFieldProps) {
         rows={4}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={() => void resolveCommand()}
         placeholder={`例如："C:\\Program Files\\App\\app.exe" "${pathPlaceholder}"`}
         className="font-mono text-xs"
       />

@@ -4,6 +4,37 @@ package main
 
 import "testing"
 
+func TestResolveExecutablePathWith(t *testing.T) {
+	lookup := func(name string) string {
+		switch name {
+		case "pwsh":
+			return `D:\Program Files\PowerShell\7\pwsh.exe`
+		case "git":
+			return `D:\Tools\git.exe`
+		default:
+			return ""
+		}
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"pwsh", `D:\Program Files\PowerShell\7\pwsh.exe`},
+		{`"pwsh"`, `D:\Program Files\PowerShell\7\pwsh.exe`},
+		{"git", `D:\Tools\git.exe`},
+		{`"C:\Program Files\PowerShell\7\pwsh.exe"`, `C:\Program Files\PowerShell\7\pwsh.exe`},
+		{`%ComSpec%`, `%ComSpec%`},
+		{"missing.exe", "missing.exe"},
+	}
+
+	for _, tt := range tests {
+		if got := resolveExecutablePathWith(tt.input, lookup); got != tt.want {
+			t.Errorf("resolveExecutablePathWith(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestNormalizeScheduledTaskSettingsRestartInterval(t *testing.T) {
 	tests := []struct {
 		name     string

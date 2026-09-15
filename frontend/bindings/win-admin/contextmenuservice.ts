@@ -39,6 +39,14 @@ export function PickIconFile(): $CancellablePromise<string> {
     return $Call.ByID(3149156607);
 }
 
+/**
+ * ResolveCommand 将命令行首个裸命令名解析为绝对可执行文件路径。
+ * Explorer 上下文菜单不会可靠继承当前用户 PATH，因此保存前需要固化可执行文件位置。
+ */
+export function ResolveCommand(command: string): $CancellablePromise<string> {
+    return $Call.ByID(1026383392, command);
+}
+
 export function Save(request: $models.SaveMenuRequest): $CancellablePromise<$models.MenuEntry> {
     return $Call.ByID(2262535832, request);
 }

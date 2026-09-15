@@ -24,6 +24,36 @@ func TestFirstCommandToken(t *testing.T) {
 	}
 }
 
+func TestResolveCommandWith(t *testing.T) {
+	lookup := func(name string) string {
+		if name == "pwsh" {
+			return `D:\Program Files\PowerShell\7\pwsh.exe`
+		}
+		if name == "git" {
+			return `D:\Tools\git.exe`
+		}
+		return ""
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{`pwsh -WorkingDirectory "%V"`, `"D:\Program Files\PowerShell\7\pwsh.exe" -WorkingDirectory "%V"`},
+		{`"pwsh" -NoLogo`, `"D:\Program Files\PowerShell\7\pwsh.exe" -NoLogo`},
+		{`git status`, `D:\Tools\git.exe status`},
+		{`"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo`, `"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo`},
+		{`%ComSpec% /c echo test`, `%ComSpec% /c echo test`},
+		{`missing.exe "%1"`, `missing.exe "%1"`},
+	}
+
+	for _, tt := range tests {
+		if got := resolveCommandWith(tt.input, lookup); got != tt.want {
+			t.Errorf("resolveCommandWith(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestValidVerbID(t *testing.T) {
 	valid := []string{"OpenWithCode", "Open With Code", "win-admin.demo.1"}
 	for _, value := range valid {
@@ -62,4 +92,3 @@ func TestIconPreviewDataURL(t *testing.T) {
 		t.Fatalf("unexpected preview prefix: %.32q", preview)
 	}
 }
-

@@ -303,14 +303,7 @@ func (s *ContextMenuService) Save(request SaveMenuRequest) (MenuEntry, error) {
 	entry.Managed = true
 	entry.ReadOnly = false
 
-	if entry.Kind == "command" {
-		command := strings.TrimSpace(entry.Command)
-		if command == "" {
-			command = strings.TrimSpace(entry.CommandTemplate)
-		}
-		entry.Command = command
-		entry.CommandTemplate = command
-	}
+	entry = normalizeMenuCommandPaths(entry)
 
 	base, _ := targetShellPath(entry.Target)
 	fullPath := base + `\` + entry.ID
@@ -465,6 +458,12 @@ func (s *ContextMenuService) InferIcon(command string) string {
 		return candidate
 	}
 	return ""
+}
+
+// ResolveCommand 将命令行首个裸命令名解析为绝对可执行文件路径。
+// Explorer 上下文菜单不会可靠继承当前用户 PATH，因此保存前需要固化可执行文件位置。
+func (s *ContextMenuService) ResolveCommand(command string) string {
+	return resolveCommandExecutable(command)
 }
 
 func (s *ContextMenuService) PickIconFile() (string, error) {
@@ -828,19 +827,63 @@ func newVerbID(label string) string {
 }
 
 func firstCommandToken(command string) string {
+	token, _ := splitCommandExecutable(command)
+	return token
+}
+
+func splitCommandExecutable(command string) (string, string) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", ""
+	}
+	if strings.HasPrefix(command, `"`) {
+		if end := strings.Index(command[1:], `"`); end >= 0 {
+			closingQuote := end + 1
+			return strings.TrimSpace(command[1:closingQuote]), command[closingQuote+1:]
+		}
+	}
+	if end := strings.IndexAny(command, " \t\r\n"); end >= 0 {
+		return strings.Trim(command[:end], `"`), command[end:]
+	}
+	return strings.Trim(command, `"`), ""
+}
+
+func normalizeMenuCommandPaths(entry MenuEntry) MenuEntry {
+	if entry.Kind == "command" || (entry.Kind == "" && len(entry.Children) == 0) {
+		command := strings.TrimSpace(entry.Command)
+		if command == "" {
+			command = strings.TrimSpace(entry.CommandTemplate)
+		}
+		command = resolveCommandExecutable(command)
+		entry.Command = command
+		entry.CommandTemplate = command
+	}
+	for index := range entry.Children {
+		entry.Children[index] = normalizeMenuCommandPaths(entry.Children[index])
+	}
+	return entry
+}
+
+func resolveCommandExecutable(command string) string {
+	return resolveCommandWith(command, resolveExecutableWithWhere)
+}
+
+func resolveCommandWith(command string, lookup func(string) string) string {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return ""
 	}
-	if strings.HasPrefix(command, `"`) {
-		if end := strings.Index(command[1:], `"`); end >= 0 {
-			return strings.TrimSpace(command[1 : end+1])
-		}
+
+	executable, arguments := splitCommandExecutable(command)
+	if executable == "" || commandExecutableIsPath(executable) {
+		return command
 	}
-	if fields := strings.Fields(command); len(fields) > 0 {
-		return strings.Trim(fields[0], `"`)
+
+	resolved := strings.TrimSpace(lookup(executable))
+	if resolved == "" {
+		return command
 	}
-	return ""
+	return quoteCommandExecutable(resolved) + arguments
 }
 
 func notifyShellAssociationChanged() {

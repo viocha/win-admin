@@ -574,6 +574,12 @@ func (s *ScheduledTaskService) Save(request SaveScheduledTaskRequest) (Scheduled
 	})
 }
 
+// ResolveExecutablePath 将计划任务“程序”字段中的裸命令名解析为绝对路径。
+// 该字段对应 Task Scheduler 的 ExecAction.Path，是独立路径字段，不需要命令行双引号。
+func (s *ScheduledTaskService) ResolveExecutablePath(command string) string {
+	return resolveExecutablePath(command)
+}
+
 func (s *ScheduledTaskService) SetEnabled(taskPath string, enabled bool) error {
 	_, err := withTaskService(func(service *ole.IDispatch) (struct{}, error) {
 		task, release, getErr := getRegisteredTask(service, taskPath)
@@ -1343,7 +1349,7 @@ func validateScheduledTaskEdit(edit ScheduledTaskEdit) (ScheduledTaskEdit, error
 		return edit, err
 	}
 	edit.Folder = folder
-	edit.Action.Command = strings.TrimSpace(edit.Action.Command)
+	edit.Action.Command = resolveExecutablePath(edit.Action.Command)
 	if edit.Action.Command == "" {
 		return edit, errors.New("程序路径不能为空")
 	}

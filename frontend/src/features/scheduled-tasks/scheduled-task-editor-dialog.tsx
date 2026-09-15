@@ -159,6 +159,22 @@ export function ScheduledTaskEditorDialog({
     }
   }
 
+  const resolveExecutable = async () => {
+    const command = draft.action.command.trim()
+    if (!command) return
+    try {
+      const resolved = await ScheduledTaskService.ResolveExecutablePath(command)
+      if (resolved && resolved !== draft.action.command) {
+        setDraft({
+          ...draft,
+          action: { ...draft.action, command: resolved },
+        })
+      }
+    } catch (reason) {
+      showError(reason, "无法解析程序路径")
+    }
+  }
+
   const importXML = async () => {
     setImportingXML(true)
     try {
@@ -481,6 +497,7 @@ export function ScheduledTaskEditorDialog({
                         ...draft,
                         action: { ...draft.action, command: event.target.value },
                       })}
+                      onBlur={() => void resolveExecutable()}
                     />
                     <InputGroupAddon align="inline-end">
                       <InputGroupButton onClick={() => void chooseExecutable()} disabled={picking}>
