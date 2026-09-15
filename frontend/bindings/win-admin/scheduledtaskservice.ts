@@ -58,14 +58,6 @@ export function PickExecutable(): $CancellablePromise<string> {
     return $Call.ByID(676604466);
 }
 
-/**
- * ResolveExecutablePath 将计划任务“程序”字段中的裸命令名解析为绝对路径。
- * 该字段对应 Task Scheduler 的 ExecAction.Path，是独立路径字段，不需要命令行双引号。
- */
-export function ResolveExecutablePath(command: string): $CancellablePromise<string> {
-    return $Call.ByID(2085474074, command);
-}
-
 export function Run(taskPath: string): $CancellablePromise<void> {
     return $Call.ByID(1946333768, taskPath);
 }

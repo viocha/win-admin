@@ -460,12 +460,6 @@ func (s *ContextMenuService) InferIcon(command string) string {
 	return ""
 }
 
-// ResolveCommand 将命令行首个裸命令名解析为绝对可执行文件路径。
-// Explorer 上下文菜单不会可靠继承当前用户 PATH，因此保存前需要固化可执行文件位置。
-func (s *ContextMenuService) ResolveCommand(command string) string {
-	return resolveCommandExecutable(command)
-}
-
 func (s *ContextMenuService) PickIconFile() (string, error) {
 	result, err := application.Get().Dialog.OpenFile().
 		CanChooseFiles(true).

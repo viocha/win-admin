@@ -103,6 +103,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
   const [templateSaving, setTemplateSaving] = useState(false)
   const [folderParent, setFolderParent] = useState<string | null>(null)
   const [folderName, setFolderName] = useState("")
+  const [folderOpen, setFolderOpen] = useState(false)
   const [folderSaving, setFolderSaving] = useState(false)
   const [deleteFolder, setDeleteFolder] = useState<TaskTreeNode | null>(null)
   const [deleteFolderOpen, setDeleteFolderOpen] = useState(false)
@@ -180,6 +181,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
   const beginCreateFolder = (parent: string) => {
     setFolderParent(parent)
     setFolderName("")
+    setFolderOpen(true)
   }
 
   const createFolder = async () => {
@@ -188,8 +190,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
     setFolderSaving(true)
     try {
       await ScheduledTaskService.CreateFolder(path)
-      setFolderParent(null)
-      setFolderName("")
+      setFolderOpen(false)
       setExpandedFolders((current) => new Set(current).add(folderParent).add(path))
       await load(true)
     } catch (reason) {
@@ -298,8 +299,6 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
     try {
       await ScheduledTaskTemplateService.Save({ id: "", name: templateName.trim(), task: templateSource })
       setTemplateSaveOpen(false)
-      setTemplateSource(null)
-      setTemplateName("")
     } catch (reason) {
       showError(reason, "无法保存")
     } finally {
@@ -545,12 +544,15 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
         onEdit={openTemplateEdit}
       />
 
-      <Dialog open={folderParent !== null} onOpenChange={(open) => {
-        if (!open) {
+      <Dialog
+        open={folderOpen}
+        onOpenChange={setFolderOpen}
+        onOpenChangeComplete={(open) => {
+          if (open) return
           setFolderParent(null)
           setFolderName("")
-        }
-      }}>
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>新建文件夹</DialogTitle>
@@ -567,7 +569,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
             </Field>
           </FieldGroup>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFolderParent(null)} disabled={folderSaving}>取消</Button>
+            <Button variant="outline" onClick={() => setFolderOpen(false)} disabled={folderSaving}>取消</Button>
             <Button onClick={() => void createFolder()} disabled={folderSaving || !folderName.trim()}>创建</Button>
           </DialogFooter>
         </DialogContent>
@@ -590,13 +592,15 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={templateSaveOpen} onOpenChange={(open) => {
-        setTemplateSaveOpen(open)
-        if (!open) {
+      <Dialog
+        open={templateSaveOpen}
+        onOpenChange={setTemplateSaveOpen}
+        onOpenChangeComplete={(open) => {
+          if (open) return
           setTemplateSource(null)
           setTemplateName("")
-        }
-      }}>
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>保存为模板</DialogTitle>

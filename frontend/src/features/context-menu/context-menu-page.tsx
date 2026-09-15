@@ -349,7 +349,7 @@ export function ContextMenuPage({ active }: { active: boolean }) {
           <DialogHeader>
             <DialogTitle>删除“{deleteEntry?.label}”？</DialogTitle>
             <DialogDescription>
-              将删除对应的 Explorer 上下文菜单注册项。此操作会立即影响该菜单的可用性。
+              将删除对应的 Explorer 上下文菜单注册项。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

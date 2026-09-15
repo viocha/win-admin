@@ -107,10 +107,19 @@ export function ScheduledTaskEditorDialog({
   const [restartCountPreset, setRestartCountPreset] = useState(task?.settings.restartCount || 3)
 
   useEffect(() => {
+    if (!open) return
     setDraft(task ? cloneScheduledTask(task) : null)
     setPassword("")
     setRestartCountPreset(task?.settings.restartCount || 3)
   }, [task, open])
+
+  const handleOpenChangeComplete = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setDraft(null)
+      setPassword("")
+    }
+    onOpenChangeComplete?.(nextOpen)
+  }
 
   if (!draft) return null
 
@@ -159,22 +168,6 @@ export function ScheduledTaskEditorDialog({
     }
   }
 
-  const resolveExecutable = async () => {
-    const command = draft.action.command.trim()
-    if (!command) return
-    try {
-      const resolved = await ScheduledTaskService.ResolveExecutablePath(command)
-      if (resolved && resolved !== draft.action.command) {
-        setDraft({
-          ...draft,
-          action: { ...draft.action, command: resolved },
-        })
-      }
-    } catch (reason) {
-      showError(reason, "无法解析程序路径")
-    }
-  }
-
   const importXML = async () => {
     setImportingXML(true)
     try {
@@ -205,7 +198,7 @@ export function ScheduledTaskEditorDialog({
   const hasStartBoundary = triggerType === "once" || triggerType === "daily" || triggerType === "weekly"
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} onOpenChangeComplete={onOpenChangeComplete}>
+    <Dialog open={open} onOpenChange={onOpenChange} onOpenChangeComplete={handleOpenChangeComplete}>
       <DialogContent className="flex h-[min(680px,calc(100vh-2rem))] !w-[min(92vw,56rem)] min-w-0 !max-w-none flex-col overflow-hidden">
         <DialogHeader>
           <div className="flex min-w-0 items-center justify-between gap-3 pr-8">
@@ -497,7 +490,6 @@ export function ScheduledTaskEditorDialog({
                         ...draft,
                         action: { ...draft.action, command: event.target.value },
                       })}
-                      onBlur={() => void resolveExecutable()}
                     />
                     <InputGroupAddon align="inline-end">
                       <InputGroupButton onClick={() => void chooseExecutable()} disabled={picking}>

@@ -90,8 +90,14 @@ export function MenuEditorDialog({
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
+    if (!open) return
     setDraft(entry ? cloneEntry(entry) : null)
   }, [entry, open])
+
+  const handleOpenChangeComplete = (nextOpen: boolean) => {
+    if (!nextOpen) setDraft(null)
+    onOpenChangeComplete?.(nextOpen)
+  }
 
   if (!draft) return null
 
@@ -113,7 +119,7 @@ export function MenuEditorDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} onOpenChangeComplete={onOpenChangeComplete}>
+    <Dialog open={open} onOpenChange={onOpenChange} onOpenChangeComplete={handleOpenChangeComplete}>
       <DialogContent className="flex h-[min(760px,calc(100vh-2rem))] !w-[min(92vw,64rem)] min-w-0 !max-w-none flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>{previousId ? "编辑上下文菜单" : "添加上下文菜单"}</DialogTitle>
@@ -333,12 +339,6 @@ function CommandField({ value, target, onChange }: CommandFieldProps) {
     onChange(suffix)
   }
 
-  const resolveCommand = async () => {
-    if (!value.trim()) return
-    const resolved = await ContextMenuService.ResolveCommand(value)
-    if (resolved && resolved !== value) onChange(resolved)
-  }
-
   return (
     <Field className="min-w-0">
       <div className="flex items-center justify-between gap-3">
@@ -351,7 +351,6 @@ function CommandField({ value, target, onChange }: CommandFieldProps) {
         rows={4}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        onBlur={() => void resolveCommand()}
         placeholder={`例如："C:\\Program Files\\App\\app.exe" "${pathPlaceholder}"`}
         className="font-mono text-xs"
       />
