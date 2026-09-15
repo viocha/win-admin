@@ -568,15 +568,14 @@ func decodeInstalledAppID(id string) (uninstallRegistryLocation, string, error) 
 	return uninstallRegistryLocation{}, "", errors.New("应用标识无效")
 }
 
-type jobObjectBasicAccountingInformation struct {
-	TotalUserTime             int64
-	TotalKernelTime           int64
-	ThisPeriodTotalUserTime   int64
-	ThisPeriodTotalKernelTime int64
-	TotalPageFaultCount       uint32
-	TotalProcesses            uint32
-	ActiveProcesses           uint32
-	TotalTerminatedProcesses  uint32
+const (
+	jobCompletionKey              uintptr = 1
+	jobObjectMsgActiveProcessZero uint32  = 4
+)
+
+type jobObjectAssociateCompletionPort struct {
+	CompletionKey  uintptr
+	CompletionPort windows.Handle
 }
 
 func startWindowsCommand(command string) error {
@@ -614,32 +613,52 @@ func startWindowsCommand(command string) error {
 		_ = windows.TerminateProcess(processInfo.Process, 1)
 		return fmt.Errorf("跟踪卸载程序失败: %w", err)
 	}
+
+	completionPort, err := windows.CreateIoCompletionPort(windows.InvalidHandle, 0, 0, 1)
+	if err != nil {
+		_ = windows.TerminateProcess(processInfo.Process, 1)
+		return fmt.Errorf("创建卸载任务事件端口失败: %w", err)
+	}
+	defer windows.CloseHandle(completionPort)
+
+	completionInfo := jobObjectAssociateCompletionPort{
+		CompletionKey:  jobCompletionKey,
+		CompletionPort: completionPort,
+	}
+	if _, err := windows.SetInformationJobObject(
+		job,
+		windows.JobObjectAssociateCompletionPortInformation,
+		uintptr(unsafe.Pointer(&completionInfo)),
+		uint32(unsafe.Sizeof(completionInfo)),
+	); err != nil {
+		_ = windows.TerminateProcess(processInfo.Process, 1)
+		return fmt.Errorf("监听卸载任务失败: %w", err)
+	}
+
 	if _, err := windows.ResumeThread(processInfo.Thread); err != nil {
 		_ = windows.TerminateProcess(processInfo.Process, 1)
 		return fmt.Errorf("启动卸载程序失败: %w", err)
 	}
 
-	return waitForJobProcesses(job)
+	return waitForJobProcesses(completionPort)
 }
 
-func waitForJobProcesses(job windows.Handle) error {
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-
+func waitForJobProcesses(completionPort windows.Handle) error {
 	for {
-		var info jobObjectBasicAccountingInformation
-		if err := windows.QueryInformationJobObject(
-			job,
-			windows.JobObjectBasicAccountingInformation,
-			uintptr(unsafe.Pointer(&info)),
-			uint32(unsafe.Sizeof(info)),
-			nil,
+		var message uint32
+		var key uintptr
+		var overlapped *windows.Overlapped
+		if err := windows.GetQueuedCompletionStatus(
+			completionPort,
+			&message,
+			&key,
+			&overlapped,
+			windows.INFINITE,
 		); err != nil {
 			return fmt.Errorf("等待卸载程序结束失败: %w", err)
 		}
-		if info.ActiveProcesses == 0 {
+		if key == jobCompletionKey && message == jobObjectMsgActiveProcessZero {
 			return nil
 		}
-		<-ticker.C
 	}
 }
