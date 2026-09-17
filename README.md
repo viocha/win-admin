@@ -1,6 +1,6 @@
 # win-admin
 
-win-admin 是一个基于 Wails v3 的 Windows 系统管理工具，当前包含资源管理器上下文菜单、Windows 计划任务、环境变量和应用卸载管理。
+win-admin 是一个基于 Wails v3 的 Windows 系统管理工具，当前包含资源管理器上下文菜单、打开方式、Windows 计划任务、环境变量和应用卸载管理。
 
 ## 技术栈
 
@@ -32,6 +32,10 @@ win-admin 是一个基于 Wails v3 的 Windows 系统管理工具，当前包含
 - 修改后调用 `SHChangeNotify` 通知 Explorer 刷新关联缓存
 
 不尝试编辑无法安全还原的 COM / CommandStore 动态扩展，这类条目在界面中标记为只读。
+
+打开方式支持按扩展名注册自定义命令，例如 `ts` 使用 `bun run`，`html` 使用 `msedge --app="%1"`。省略 `%1` 时，文件路径会作为命令的最后一个参数传入。
+
+保存后需在 Windows 的“默认应用”设置中将对应扩展名设为“win-admin”；应用不会直接修改系统维护的用户默认选择。修改扩展名或删除已设为默认的命令后，旧扩展名可能需要重新选择默认应用。
 
 计划任务支持：
 

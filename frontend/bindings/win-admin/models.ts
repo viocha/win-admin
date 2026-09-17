@@ -20,6 +20,15 @@ export interface EnvironmentVariable {
     "expandable": boolean;
 }
 
+/**
+ * FileAssociation 是当前用户注册的文件打开命令。
+ */
+export interface FileAssociation {
+    "extension": string;
+    "command": string;
+    "active": boolean;
+}
+
 export interface InstalledApp {
     "id": string;
     "name": string;

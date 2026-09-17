@@ -4,12 +4,14 @@
 import * as AppUninstallService from "./appuninstallservice.js";
 import * as ContextMenuService from "./contextmenuservice.js";
 import * as EnvironmentVariableService from "./environmentvariableservice.js";
+import * as FileAssociationService from "./fileassociationservice.js";
 import * as ScheduledTaskService from "./scheduledtaskservice.js";
 import * as ScheduledTaskTemplateService from "./scheduledtasktemplateservice.js";
 export {
     AppUninstallService,
     ContextMenuService,
     EnvironmentVariableService,
+    FileAssociationService,
     ScheduledTaskService,
     ScheduledTaskTemplateService
 };
@@ -18,6 +20,7 @@ export type {
     ContextMenuStatus,
     EnvironmentPathEntry,
     EnvironmentVariable,
+    FileAssociation,
     InstalledApp,
     InstalledAppSize,
     MenuEntry,

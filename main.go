@@ -27,7 +27,7 @@ func main() {
 	var window *application.WebviewWindow
 	app := application.New(application.Options{
 		Name:        "win-admin",
-		Description: "Windows 系统管理工具",
+		Description: "win-admin 系统管理工具",
 		Windows:     windowsOptions,
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "win-admin",
@@ -40,6 +40,7 @@ func main() {
 		},
 		Services: []application.Service{
 			application.NewService(&ContextMenuService{}),
+			application.NewService(&FileAssociationService{}),
 			application.NewService(&ScheduledTaskService{}),
 			application.NewService(&ScheduledTaskTemplateService{}),
 			application.NewService(&EnvironmentVariableService{}),
