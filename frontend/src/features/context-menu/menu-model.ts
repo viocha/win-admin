@@ -41,6 +41,7 @@ export function createEmptyEntry(target: TargetType, kind: MenuKind = "command")
     commandTemplate: "",
     icon: "",
     position: "normal",
+	extensions: "",
 	shiftOnly: false,
     enabled: true,
     managed: true,

@@ -211,6 +211,18 @@ export function MenuEditorDialog({
                 </Field>
               </FieldGroup>
 
+              {draft.target === "file" ? (
+                <Field className="min-w-0">
+                  <FieldLabel htmlFor="menu-extensions">扩展名过滤</FieldLabel>
+                  <Input
+                    id="menu-extensions"
+                    value={draft.extensions}
+                    onChange={(event) => setDraft({ ...draft, extensions: event.target.value })}
+                    placeholder="exe, ps1, bat；留空表示全部文件"
+                  />
+                </Field>
+              ) : null}
+
 			  <label className="flex min-h-9 cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 text-sm transition-colors hover:bg-muted/30">
 				<span>仅按住 Shift 时显示</span>
 				<Switch

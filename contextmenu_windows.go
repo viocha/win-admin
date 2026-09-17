@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -23,6 +24,8 @@ import (
 const classesRoot = `Software\Classes`
 
 var safeVerbPattern = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+var menuExtensionPattern = regexp.MustCompile(`^\.[a-z0-9][a-z0-9_-]*$`)
+var menuAppliesToExtensionPattern = regexp.MustCompile(`(?i)System\.FileExtension\s*:=\s*"?(\.[a-z0-9][a-z0-9_-]*)"?`)
 
 type menuRegistrySource struct {
 	root     registry.Key
@@ -289,6 +292,15 @@ func (s *ContextMenuService) Save(request SaveMenuRequest) (MenuEntry, error) {
 	if _, err := targetShellPath(entry.Target); err != nil {
 		return MenuEntry{}, err
 	}
+	if entry.Target == "file" {
+		extensions, err := normalizeMenuExtensions(entry.Extensions)
+		if err != nil {
+			return MenuEntry{}, err
+		}
+		entry.Extensions = extensions
+	} else {
+		entry.Extensions = ""
+	}
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		return MenuEntry{}, errors.New("当前进程未以管理员权限运行，无法写入 HKLM")
 	}
@@ -518,6 +530,7 @@ func readMenuEntryAt(root registry.Key, hive, parentPath, id, target string, dep
 		Target:       target,
 		Icon:         readString(key, "Icon"),
 		Position:     strings.ToLower(readString(key, "Position")),
+		Extensions:   parseMenuExtensions(readString(key, "AppliesTo")),
 		ShiftOnly:    hasValue(key, "Extended"),
 		Enabled:      !hasValue(key, "LegacyDisable"),
 		Managed:      readString(key, "win-admin-managed") == "1",
@@ -645,6 +658,15 @@ func writeMenuEntry(parentPath string, entry MenuEntry) error {
 	if entry.Icon != "" {
 		_ = key.SetStringValue("Icon", entry.Icon)
 	}
+	if entry.Target == "file" && strings.TrimSpace(entry.Extensions) != "" {
+		appliesTo, err := menuExtensionsAppliesTo(entry.Extensions)
+		if err != nil {
+			return err
+		}
+		if appliesTo != "" {
+			_ = key.SetStringValue("AppliesTo", appliesTo)
+		}
+	}
 	switch strings.ToLower(entry.Position) {
 	case "top":
 		_ = key.SetStringValue("Position", "Top")
@@ -696,6 +718,71 @@ func writeMenuEntry(parentPath string, entry MenuEntry) error {
 		return fmt.Errorf("写入命令失败: %w", err)
 	}
 	return nil
+}
+
+func normalizeMenuExtensions(value string) (string, error) {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || unicode.IsSpace(r)
+	})
+	if len(parts) == 0 {
+		return "", nil
+	}
+	seen := make(map[string]struct{}, len(parts))
+	extensions := make([]string, 0, len(parts))
+	for _, part := range parts {
+		extension := strings.ToLower(strings.TrimSpace(part))
+		extension = strings.TrimPrefix(extension, "*")
+		if extension != "" && !strings.HasPrefix(extension, ".") {
+			extension = "." + extension
+		}
+		if !menuExtensionPattern.MatchString(extension) {
+			return "", fmt.Errorf("无效的扩展名 %q，请输入例如 exe, ps1, bat", part)
+		}
+		if _, exists := seen[extension]; exists {
+			continue
+		}
+		seen[extension] = struct{}{}
+		extensions = append(extensions, strings.TrimPrefix(extension, "."))
+	}
+	return strings.Join(extensions, ", "), nil
+}
+
+func menuExtensionsAppliesTo(value string) (string, error) {
+	normalized, err := normalizeMenuExtensions(value)
+	if err != nil || normalized == "" {
+		return "", err
+	}
+	parts := strings.Split(normalized, ", ")
+	conditions := make([]string, 0, len(parts))
+	for _, extension := range parts {
+		conditions = append(conditions, "System.FileExtension:=."+extension)
+	}
+	return strings.Join(conditions, " OR "), nil
+}
+
+func parseMenuExtensions(appliesTo string) string {
+	value := strings.TrimSpace(appliesTo)
+	if value == "" {
+		return ""
+	}
+	if menuExtensionPattern.MatchString(strings.ToLower(value)) {
+		return strings.TrimPrefix(strings.ToLower(value), ".")
+	}
+	matches := menuAppliesToExtensionPattern.FindAllStringSubmatch(value, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	remainder := menuAppliesToExtensionPattern.ReplaceAllString(value, "")
+	remainder = strings.ReplaceAll(strings.ToUpper(remainder), "OR", "")
+	remainder = strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "", "(", "", ")", "").Replace(remainder)
+	if remainder != "" {
+		return ""
+	}
+	extensions := make([]string, 0, len(matches))
+	for _, match := range matches {
+		extensions = append(extensions, strings.TrimPrefix(strings.ToLower(match[1]), "."))
+	}
+	return strings.Join(extensions, ", ")
 }
 
 func deleteTreeIfExists(root registry.Key, path string) error {

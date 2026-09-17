@@ -27,6 +27,7 @@ export interface FileAssociation {
     "extension": string;
     "command": string;
     "active": boolean;
+    "registryPath": string;
 }
 
 export interface InstalledApp {
@@ -57,6 +58,7 @@ export interface MenuEntry {
     "commandTemplate": string;
     "icon": string;
     "position": string;
+    "extensions": string;
     "shiftOnly": boolean;
     "enabled": boolean;
     "managed": boolean;

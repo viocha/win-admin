@@ -70,6 +70,23 @@ func TestValidVerbID(t *testing.T) {
 	}
 }
 
+func TestMenuExtensionsAppliesTo(t *testing.T) {
+	got, err := menuExtensionsAppliesTo("EXE, *.ps1 exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "System.FileExtension:=.exe OR System.FileExtension:=.ps1"
+	if got != want {
+		t.Fatalf("menuExtensionsAppliesTo() = %q, want %q", got, want)
+	}
+	if parsed := parseMenuExtensions(got); parsed != "exe, ps1" {
+		t.Fatalf("parseMenuExtensions() = %q, want %q", parsed, "exe, ps1")
+	}
+	if _, err := menuExtensionsAppliesTo("exe, bad/ext"); err == nil {
+		t.Fatal("非法扩展名应报错")
+	}
+}
+
 func TestParseIconLocation(t *testing.T) {
 	path, index, err := parseIconLocation(`"%SystemRoot%\System32\shell32.dll",-42`)
 	if err != nil {

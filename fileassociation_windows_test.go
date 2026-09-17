@@ -27,6 +27,14 @@ func TestNormalizeAssociationExtension(t *testing.T) {
 	}
 }
 
+func TestAssociationRegistryPath(t *testing.T) {
+	got := associationRegistryPath(".ts")
+	want := `HKCU\Software\Classes\WinAdmin.File.ts`
+	if got != want {
+		t.Fatalf("associationRegistryPath() = %q, want %q", got, want)
+	}
+}
+
 func TestNormalizeAssociationCommand(t *testing.T) {
 	for _, test := range []struct {
 		input string

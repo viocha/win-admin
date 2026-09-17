@@ -55,6 +55,10 @@ func associationProgID(extension string) string {
 	return "WinAdmin.File." + strings.TrimPrefix(extension, ".")
 }
 
+func associationRegistryPath(extension string) string {
+	return `HKCU\Software\Classes\` + associationProgID(extension)
+}
+
 func associationLauncherCommand(extension string) (string, error) {
 	launcher, err := associationLauncherPath()
 	if err != nil {
@@ -165,7 +169,12 @@ func (s *FileAssociationService) List() ([]FileAssociation, error) {
 		if readErr != nil {
 			return nil, fmt.Errorf("读取打开命令失败: %w", readErr)
 		}
-		items = append(items, FileAssociation{Extension: extension, Command: userCommand, Active: associationIsActive(extension, progID)})
+		items = append(items, FileAssociation{
+			Extension:    extension,
+			Command:      userCommand,
+			Active:       associationIsActive(extension, progID),
+			RegistryPath: associationRegistryPath(extension),
+		})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Extension < items[j].Extension })
 	return items, nil
@@ -218,7 +227,12 @@ func (s *FileAssociationService) Save(extension, command string) (FileAssociatio
 		return FileAssociation{}, err
 	}
 	notifyShellAssociationChanged()
-	return FileAssociation{Extension: extension, Command: command, Active: associationIsActive(extension, progID)}, nil
+	return FileAssociation{
+		Extension:    extension,
+		Command:      command,
+		Active:       associationIsActive(extension, progID),
+		RegistryPath: associationRegistryPath(extension),
+	}, nil
 }
 
 func (s *FileAssociationService) Rename(previousExtension, extension, command string) (FileAssociation, error) {

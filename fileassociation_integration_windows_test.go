@@ -59,7 +59,7 @@ func TestFileAssociationRegistryRoundTrip(t *testing.T) {
 	}
 	for _, item := range items {
 		if item.Extension == extension {
-			if item.Command != command || item.Active {
+			if item.Command != command || item.Active || item.RegistryPath != associationRegistryPath(extension) {
 				t.Fatalf("读取结果不符: %+v", item)
 			}
 			return

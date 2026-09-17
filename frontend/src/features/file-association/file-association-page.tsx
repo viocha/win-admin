@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { ExternalLinkIcon, LoaderCircleIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
+import { CopyIcon, ExternalLinkIcon, LoaderCircleIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
 
 import { FileAssociationService, type FileAssociation } from "../../../bindings/win-admin"
 import { Badge } from "@/components/ui/badge"
@@ -171,10 +171,18 @@ export function FileAssociationPage({ active }: { active: boolean }) {
                       </Badge>
                     </button>
                   </ContextMenuTrigger>
-                  <ContextMenuContent className="w-28">
+                  <ContextMenuContent className="min-w-max">
                     <ContextMenuItem onClick={() => edit(item)}>
                       <PencilIcon />
                       编辑
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      className="whitespace-nowrap"
+                      onClick={() => navigator.clipboard.writeText(item.registryPath)}
+                    >
+                      <CopyIcon />
+                      复制注册表路径
                     </ContextMenuItem>
                     <ContextMenuSeparator />
                     <ContextMenuItem onClick={() => { setDeleteItem(item); setDeleteOpen(true) }}>
