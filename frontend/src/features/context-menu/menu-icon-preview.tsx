@@ -13,6 +13,7 @@ type MenuIconPreviewProps = {
 
 export function MenuIconPreview({ icon, command, kind, className }: MenuIconPreviewProps) {
   const [source, setSource] = useState("")
+  const hasExplicitIcon = Boolean(icon.trim())
 
   useEffect(() => {
     let cancelled = false
@@ -39,12 +40,12 @@ export function MenuIconPreview({ icon, command, kind, className }: MenuIconPrev
         src={source}
         alt=""
         draggable={false}
-        className={cn("size-5 shrink-0 object-contain", className)}
+        className={cn("size-5 shrink-0 object-contain", !hasExplicitIcon && "opacity-50", className)}
       />
     )
   }
 
   const FallbackIcon = kind === "submenu" ? FolderTreeIcon : TerminalSquareIcon
-  return <FallbackIcon className={cn("size-5 shrink-0", className)} />
+  return <FallbackIcon className={cn("size-5 shrink-0 text-muted-foreground", className)} />
 }
 

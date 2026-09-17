@@ -207,7 +207,7 @@ func readContextMenuHandlers(source menuRegistrySource, target string) ([]MenuEn
 			Kind:            "command",
 			Command:         server,
 			CommandTemplate: server,
-			Icon:            server,
+			Icon:            "",
 			Position:        "normal",
 			Enabled:         enabled,
 			ReadOnly:        true,

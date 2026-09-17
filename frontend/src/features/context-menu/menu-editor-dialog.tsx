@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   AlignJustifyIcon,
   ArrowDownIcon,
@@ -267,15 +267,25 @@ type IconFieldProps = {
 }
 
 function IconField({ icon, command, kind, onChange }: IconFieldProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const replaceIcon = (value: string) => {
+    const input = inputRef.current
+    if (!input) return
+    input.focus()
+    input.select()
+    document.execCommand("insertText", false, value)
+  }
+
   const infer = async () => {
     if (!command.trim()) return
     const result = await ContextMenuService.InferIcon(command)
-    if (result) onChange(result)
+    if (result) replaceIcon(result)
   }
 
   const pick = async () => {
     const result = await ContextMenuService.PickIconFile()
-    if (result) onChange(result)
+    if (result) replaceIcon(result)
   }
 
   return (
@@ -287,6 +297,7 @@ function IconField({ icon, command, kind, onChange }: IconFieldProps) {
         </div>
         <InputGroup className="min-w-0 flex-1">
           <InputGroupInput
+            ref={inputRef}
             value={icon}
             onChange={(event) => onChange(event.target.value)}
             placeholder="EXE / DLL / ICO，可留空"
@@ -333,21 +344,44 @@ type CommandFieldProps = {
 
 function CommandField({ value, target, onChange }: CommandFieldProps) {
   const pathPlaceholder = target === "background" ? "%V" : "%1"
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const selectionRef = useRef<{ start: number; end: number } | null>(null)
 
   const insertPath = () => {
-    const suffix = value.trim() ? `${value} "${pathPlaceholder}"` : `"${pathPlaceholder}"`
-    onChange(suffix)
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const selection = selectionRef.current ?? (
+      document.activeElement === textarea
+        ? { start: textarea.selectionStart, end: textarea.selectionEnd }
+        : { start: textarea.value.length, end: textarea.value.length }
+    )
+    selectionRef.current = null
+    textarea.focus()
+    textarea.setSelectionRange(selection.start, selection.end)
+    document.execCommand("insertText", false, `"${pathPlaceholder}"`)
   }
 
   return (
     <Field className="min-w-0">
       <div className="flex items-center justify-between gap-3">
         <FieldLabel>命令</FieldLabel>
-        <Button type="button" variant="outline" size="xs" onClick={insertPath}>
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          onPointerDown={() => {
+            const textarea = textareaRef.current
+            selectionRef.current = textarea && document.activeElement === textarea
+              ? { start: textarea.selectionStart, end: textarea.selectionEnd }
+              : null
+          }}
+          onClick={insertPath}
+        >
           插入路径
         </Button>
       </div>
       <Textarea
+        ref={textareaRef}
         rows={4}
         value={value}
         onChange={(event) => onChange(event.target.value)}
