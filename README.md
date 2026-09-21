@@ -1,6 +1,6 @@
-# win-admin
+# Win Admin
 
-win-admin 是一个基于 Wails v3 的 Windows 系统管理工具，当前包含资源管理器上下文菜单、打开方式、Windows 计划任务、环境变量和应用卸载管理。
+Win Admin 是一个基于 Wails v3 的 Windows 系统管理工具，当前包含资源管理器上下文菜单、打开方式、Windows 计划任务、环境变量和应用卸载管理。
 
 ## 技术栈
 
