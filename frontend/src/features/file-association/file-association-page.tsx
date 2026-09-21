@@ -134,7 +134,7 @@ export function FileAssociationPage({ active }: { active: boolean }) {
       </div>
 
       <p className="mt-3 shrink-0 text-sm text-muted-foreground">
-        仅显示本工具添加的命令；保存后需在 Windows 默认应用设置中选择“win-admin”，双击才会生效。
+        仅显示本工具添加的命令；保存后需在 Windows 默认应用设置中选择“Win Admin”，双击才会生效。
       </p>
 
       <div className="mt-4 min-h-0 flex-1">

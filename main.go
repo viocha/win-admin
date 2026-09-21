@@ -26,8 +26,8 @@ func main() {
 
 	var window *application.WebviewWindow
 	app := application.New(application.Options{
-		Name:        "win-admin",
-		Description: "win-admin 系统管理工具",
+		Name:        "Win Admin",
+		Description: "Win Admin 系统管理工具",
 		Windows:     windowsOptions,
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "win-admin",
@@ -52,7 +52,7 @@ func main() {
 	})
 
 	window = app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "win-admin",
+		Title:            "Win Admin",
 		Width:            1280,
 		Height:           820,
 		MinWidth:         720,

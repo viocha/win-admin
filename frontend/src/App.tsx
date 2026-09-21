@@ -49,7 +49,7 @@ function App() {
         <Sidebar collapsible="icon">
           <SidebarHeader className="group-data-[collapsible=icon]:hidden">
             <div className="flex h-10 items-center px-2">
-              <div className="truncate text-sm font-semibold">win-admin</div>
+              <div className="truncate text-sm font-semibold">Win Admin</div>
             </div>
           </SidebarHeader>
 

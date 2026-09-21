@@ -6,9 +6,9 @@
     "0000": {
       "ProductVersion": "0.1.0",
       "CompanyName": "My Company",
-      "FileDescription": "win-admin",
+      "FileDescription": "Win Admin 系统管理工具",
       "LegalCopyright": "© 2026, My Company",
-      "ProductName": "win-admin",
+      "ProductName": "Win Admin",
       "Comments": "This is a comment"
     }
   }

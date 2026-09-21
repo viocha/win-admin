@@ -19,6 +19,7 @@ import (
 
 const (
 	associationAppName         = "win-admin"
+	associationDisplayName     = "Win Admin"
 	associationCapabilities    = `Software\win-admin\Capabilities`
 	associationMappings        = associationCapabilities + `\FileAssociations`
 	associationClasses         = `Software\Classes\`
@@ -214,7 +215,7 @@ func (s *FileAssociationService) Save(extension, command string) (FileAssociatio
 	if err := setAssociationValue(associationClasses+extension+`\OpenWithProgids`, progID, ""); err != nil {
 		return FileAssociation{}, err
 	}
-	if err := setAssociationValue(associationCapabilities, "ApplicationName", associationAppName); err != nil {
+	if err := setAssociationValue(associationCapabilities, "ApplicationName", associationDisplayName); err != nil {
 		return FileAssociation{}, err
 	}
 	if err := setAssociationValue(associationCapabilities, "ApplicationDescription", "按扩展名运行自定义打开命令"); err != nil {

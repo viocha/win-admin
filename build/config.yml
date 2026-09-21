@@ -6,7 +6,7 @@ version: '3'
 # This information is used to generate the build assets.
 info:
   companyName: "My Company" # The name of the company
-  productName: "win-admin" # The name of the application
+  productName: "Win Admin" # The name of the application
   productIdentifier: "win-admin" # The unique product identifier
   description: "Windows system management tool" # The application description
   copyright: "(c) 2025, My Company" # Copyright text
