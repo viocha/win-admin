@@ -27,7 +27,7 @@ func main() {
 	var window *application.WebviewWindow
 	app := application.New(application.Options{
 		Name:        "Win Admin",
-		Description: "Win Admin Windows system management tool",
+		Description: "Win Admin",
 		Windows:     windowsOptions,
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "win-admin",

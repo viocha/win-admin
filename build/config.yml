@@ -8,7 +8,7 @@ info:
   companyName: "My Company" # The name of the company
   productName: "Win Admin" # The name of the application
   productIdentifier: "win-admin" # The unique product identifier
-  description: "Win Admin Windows system management tool" # The application description
+  description: "Win Admin" # The application description
   copyright: "(c) 2025, My Company" # Copyright text
   comments: "Some Product Comments" # Comments
   version: "0.0.1" # The application version
