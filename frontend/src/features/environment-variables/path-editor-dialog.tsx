@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  ArrowUpToLineIcon,
   LoaderCircleIcon,
   PlusIcon,
   Trash2Icon,
@@ -31,29 +32,18 @@ type PathEditorDialogProps = {
   onSaved: () => Promise<void>
 }
 
+type PathEntry = EnvironmentPathEntry & { validated: boolean }
+
 export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEditorDialogProps) {
-  const [entries, setEntries] = useState<EnvironmentPathEntry[]>([])
+  const [entries, setEntries] = useState<PathEntry[]>([])
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-
-  const displayEntries = useMemo(() => (
-    entries
-      .map((entry, index) => ({ entry, index }))
-      .toSorted((left, right) => {
-        if (left.entry.exists !== right.entry.exists) return left.entry.exists ? 1 : -1
-        return left.index - right.index
-      })
-  ), [entries])
-
-  const selectedDisplayIndex = selectedIndex === null
-    ? -1
-    : displayEntries.findIndex((item) => item.index === selectedIndex)
+  const pendingFocusIndex = useRef<number | null>(null)
+  const pendingScrollToTop = useRef(false)
 
   const canMoveSelected = (offset: -1 | 1) => {
-    if (selectedDisplayIndex < 0 || selectedIndex === null) return false
-    const target = displayEntries[selectedDisplayIndex + offset]
-    return !!target && target.entry.exists === entries[selectedIndex]?.exists
+    return selectedIndex !== null && selectedIndex + offset >= 0 && selectedIndex + offset < entries.length
   }
 
   useEffect(() => {
@@ -62,7 +52,7 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
     void EnvironmentVariableService.GetPath(scope)
       .then((items) => {
         const next = items ?? []
-        setEntries(next)
+        setEntries(next.map((entry) => ({ ...entry, validated: true })))
         setSelectedIndex(null)
       })
       .catch((reason) => showError(reason, "无法读取 PATH"))
@@ -71,31 +61,49 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
 
   useEffect(() => {
     if (!open || loading) return
+    let active = true
     const timer = window.setTimeout(() => {
       void EnvironmentVariableService.AnalyzePath(scope, entries.map((entry) => entry.value))
-        .then((items) => setEntries(items ?? []))
-        .catch((reason) => showError(reason, "PATH 检查失败"))
+        .then((items) => {
+          if (active) setEntries((items ?? []).map((entry) => ({ ...entry, validated: true })))
+        })
+        .catch((reason) => {
+          if (active) showError(reason, "PATH 检查失败")
+        })
     }, 250)
-    return () => window.clearTimeout(timer)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
   }, [entries.map((entry) => entry.value).join("\u0000"), loading, open, scope])
 
   const updateEntry = (index: number, value: string) => {
     setEntries((current) => current.map((entry, itemIndex) => (
-      itemIndex === index ? { ...entry, value } : entry
+      itemIndex === index ? { ...entry, value, validated: false } : entry
     )))
   }
 
   const moveSelected = (offset: -1 | 1) => {
-    if (selectedIndex === null || selectedDisplayIndex < 0) return
-    const targetItem = displayEntries[selectedDisplayIndex + offset]
-    if (!targetItem || targetItem.entry.exists !== entries[selectedIndex]?.exists) return
-    const target = targetItem.index
+    if (!canMoveSelected(offset) || selectedIndex === null) return
+    const target = selectedIndex + offset
     setEntries((current) => {
       const next = [...current]
       ;[next[selectedIndex], next[target]] = [next[target], next[selectedIndex]]
       return next
     })
     setSelectedIndex(target)
+  }
+
+  const moveSelectedToTop = () => {
+    if (selectedIndex === null || selectedIndex <= 0) return
+    pendingScrollToTop.current = true
+    setEntries((current) => {
+      const next = [...current]
+      const [entry] = next.splice(selectedIndex, 1)
+      next.unshift(entry)
+      return next
+    })
+    setSelectedIndex(0)
   }
 
   const removeEntry = (index: number) => {
@@ -108,7 +116,8 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
   }
 
   const addEntry = () => {
-    setEntries((current) => [...current, { value: "", expanded: "", exists: false }])
+    pendingFocusIndex.current = entries.length
+    setEntries((current) => [...current, { value: "", expanded: "", exists: false, validated: false }])
     setSelectedIndex(entries.length)
   }
 
@@ -140,19 +149,34 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
               </div>
             ) : (
               <div className="flex flex-col gap-1">
-                {displayEntries.map(({ entry, index }) => (
+                {entries.map((entry, index) => (
                   <div
                     key={index}
                     className={`flex min-w-0 items-center gap-1.5 rounded-lg p-1 transition-colors ${selectedIndex === index ? "bg-muted/50" : ""}`}
                   >
-                    <Input
-                      value={entry.value}
-                      onChange={(event) => updateEntry(index, event.target.value)}
-                      onFocus={() => setSelectedIndex(index)}
-                      className="min-w-0 flex-1 font-mono text-xs"
-                      aria-label={`PATH 项 ${index + 1}`}
-                    />
-                    {entry.value.trim() && !entry.exists ? <Badge variant="destructive">不存在</Badge> : null}
+                    <div className="relative min-w-0 flex-1">
+                      <Input
+                        ref={(input) => {
+                          if (input && pendingFocusIndex.current === index) {
+                            pendingFocusIndex.current = null
+                            input.focus()
+                          }
+                          if (input && index === 0 && pendingScrollToTop.current) {
+                            pendingScrollToTop.current = false
+                            const viewport = input.closest<HTMLElement>('[data-slot="scroll-area-viewport"]')
+                            if (viewport) viewport.scrollTop = 0
+                          }
+                        }}
+                        value={entry.value}
+                        onChange={(event) => updateEntry(index, event.target.value)}
+                        onFocus={() => setSelectedIndex(index)}
+                        className="min-w-0 pr-16 font-mono text-xs"
+                        aria-label={`PATH 项 ${index + 1}`}
+                      />
+                      {entry.value.trim() && entry.validated && !entry.exists ? (
+                        <Badge variant="destructive" className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">不存在</Badge>
+                      ) : null}
+                    </div>
                     <Button variant="ghost" size="icon-sm" onClick={() => removeEntry(index)} aria-label="删除 PATH 项">
                       <Trash2Icon />
                     </Button>
@@ -168,6 +192,15 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
             <Button variant="outline" size="sm" onClick={addEntry} disabled={saving || loading}>
               <PlusIcon data-icon="inline-start" />
               添加
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={moveSelectedToTop}
+              disabled={selectedIndex === null || selectedIndex <= 0 || saving || loading}
+              aria-label="置顶选中项"
+            >
+              <ArrowUpToLineIcon />
             </Button>
             <Button
               variant="ghost"
@@ -195,4 +228,3 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
     </Dialog>
   )
 }
-
