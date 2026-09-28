@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+	"win-admin/internal/fileassociation"
 )
 
 const (
@@ -114,22 +115,7 @@ func associationProgID(extension string) string {
 }
 
 func commandParts(command, filePath string) ([]string, error) {
-	args, err := windows.DecomposeCommandLine(command)
-	if err != nil || len(args) == 0 || args[0] == "" {
-		return nil, errors.New("打开命令格式无效")
-	}
-
-	hasFilePath := false
-	for index := 1; index < len(args); index++ {
-		if strings.Contains(args[index], "%1") {
-			hasFilePath = true
-		}
-		args[index] = strings.ReplaceAll(args[index], "%1", filePath)
-	}
-	if !hasFilePath {
-		args = append(args, filePath)
-	}
-	return args, nil
+	return fileassociation.CommandParts(command, filePath)
 }
 
 func showError(err error) {

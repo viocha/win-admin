@@ -201,7 +201,7 @@ export function FileAssociationPage({ active }: { active: boolean }) {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingExtension ? `编辑 ${displayExtension(editingExtension)}` : "添加打开方式"}</DialogTitle>
-            <DialogDescription>使用 %1 表示文件路径；省略时将路径作为最后一个参数传入。</DialogDescription>
+            <DialogDescription>%1 表示文件路径，%u 表示 file URL；都省略时将路径作为最后一个参数传入。</DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>
@@ -220,7 +220,7 @@ export function FileAssociationPage({ active }: { active: boolean }) {
                 rows={3}
                 value={command}
                 onChange={(event) => setCommand(event.target.value)}
-                placeholder={'bun run 或 msedge --app="%1"'}
+                placeholder={'bun run 或 msedge --app="%u"'}
                 className="max-h-40 resize-none font-mono text-xs"
               />
             </Field>
