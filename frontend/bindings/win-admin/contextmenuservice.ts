@@ -35,6 +35,10 @@ export function List(target: string): $CancellablePromise<$models.MenuEntry[] | 
     return $Call.ByID(2105383697, target);
 }
 
+export function OpenRegistry(registryPath: string): $CancellablePromise<void> {
+    return $Call.ByID(2498849226, registryPath);
+}
+
 export function PickIconFile(): $CancellablePromise<string> {
     return $Call.ByID(3149156607);
 }

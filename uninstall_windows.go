@@ -129,6 +129,61 @@ func (s *AppUninstallService) Uninstall(id string) error {
 	return startWindowsCommand(command)
 }
 
+func (s *AppUninstallService) OpenInstallLocation(id string) error {
+	location, subkeyName, err := decodeInstalledAppID(id)
+	if err != nil {
+		return err
+	}
+	key, err := registry.OpenKey(location.root, uninstallRegistryPath+`\`+subkeyName, registry.QUERY_VALUE|location.view)
+	if err != nil {
+		return fmt.Errorf("读取安装位置失败: %w", err)
+	}
+	installLocation := inferInstallLocation(
+		readUninstallString(key, "InstallLocation"),
+		readUninstallString(key, "DisplayIcon"),
+		readUninstallString(key, "UninstallString"),
+		readUninstallString(key, "QuietUninstallString"),
+	)
+	key.Close()
+	if installLocation == "" {
+		return errors.New("找不到安装位置")
+	}
+	path, err := windows.UTF16PtrFromString(installLocation)
+	if err != nil {
+		return fmt.Errorf("安装位置无效: %w", err)
+	}
+	if err := windows.ShellExecute(0, nil, path, nil, nil, 1); err != nil {
+		return fmt.Errorf("打开安装位置失败: %w", err)
+	}
+	return nil
+}
+
+func (s *AppUninstallService) OpenRegistry(id string) error {
+	location, subkeyName, err := decodeInstalledAppID(id)
+	if err != nil {
+		return err
+	}
+	key, err := registry.OpenKey(location.root, uninstallRegistryPath+`\`+subkeyName, registry.QUERY_VALUE|location.view)
+	if err != nil {
+		return fmt.Errorf("读取应用注册表项失败: %w", err)
+	}
+	key.Close()
+
+	return openRegistryKey(installedAppRegistryPath(location, subkeyName))
+}
+
+func installedAppRegistryPath(location uninstallRegistryLocation, subkeyName string) string {
+	hive := `HKEY_CURRENT_USER`
+	path := uninstallRegistryPath
+	if location.scope == "system" {
+		hive = `HKEY_LOCAL_MACHINE`
+		if location.architecture == "x86" {
+			path = strings.Replace(path, `SOFTWARE\`, `SOFTWARE\WOW6432Node\`, 1)
+		}
+	}
+	return hive + `\` + path + `\` + subkeyName
+}
+
 func listInstalledAppsAt(location uninstallRegistryLocation) ([]InstalledApp, error) {
 	key, err := registry.OpenKey(location.root, uninstallRegistryPath, registry.ENUMERATE_SUB_KEYS|location.view)
 	if errors.Is(err, registry.ErrNotExist) {
@@ -207,6 +262,7 @@ func readInstalledApp(location uninstallRegistryLocation, subkeyName string) (In
 		InstallTimestamp: installTimestamp,
 		EstimatedSizeKB:  readUninstallDWORD(key, "EstimatedSize"),
 		InstallLocation:  installLocation,
+		RegistryPath:     installedAppRegistryPath(location, subkeyName),
 		Scope:            location.scope,
 		Architecture:     location.architecture,
 	}, nil

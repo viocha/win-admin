@@ -31,6 +31,9 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 && args[0] == "--menu" {
+		return runMenu(args[1:])
+	}
 	if len(args) != 2 {
 		return errors.New("文件打开参数无效")
 	}
@@ -73,6 +76,71 @@ func run(args []string) error {
 		return fmt.Errorf("运行打开命令失败: %w", err)
 	}
 	return nil
+}
+
+func runMenu(args []string) error {
+	if len(args) != 2 {
+		return errors.New("菜单命令参数无效")
+	}
+	keyPath := args[0]
+	if !strings.HasPrefix(strings.ToLower(keyPath), strings.ToLower(associationClasses)) ||
+		!strings.HasSuffix(strings.ToLower(keyPath), `\command`) {
+		return errors.New("菜单注册表路径无效")
+	}
+	filePath, err := filepath.Abs(args[1])
+	if err != nil || strings.TrimSpace(args[1]) == "" {
+		return errors.New("菜单目标路径无效")
+	}
+	parent, err := registry.OpenKey(registry.LOCAL_MACHINE, strings.TrimSuffix(keyPath, `\command`), registry.QUERY_VALUE)
+	if err != nil {
+		return fmt.Errorf("读取菜单失败: %w", err)
+	}
+	managed, _, managedErr := parent.GetStringValue("win-admin-managed")
+	parent.Close()
+	if managedErr != nil || managed != "1" {
+		return errors.New("菜单不属于 win-admin")
+	}
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, keyPath, registry.QUERY_VALUE)
+	if err != nil {
+		return fmt.Errorf("读取菜单命令失败: %w", err)
+	}
+	command, _, commandErr := key.GetStringValue(associationCommandValue)
+	key.Close()
+	if commandErr != nil {
+		return fmt.Errorf("读取菜单命令失败: %w", commandErr)
+	}
+	parts, err := menuCommandParts(command, filePath)
+	if err != nil {
+		return err
+	}
+	workingDir := filepath.Dir(filePath)
+	if info, err := os.Stat(filePath); err == nil && info.IsDir() {
+		workingDir = filePath
+	}
+	if err := startMenuCommand(parts, workingDir); err != nil {
+		return fmt.Errorf("运行菜单命令失败: %w", err)
+	}
+	return nil
+}
+
+func menuCommandParts(command, filePath string) ([]string, error) {
+	return fileassociation.CommandParts(strings.ReplaceAll(command, "%V", "%1"), filePath)
+}
+
+func startMenuCommand(parts []string, dir string) error {
+	program, err := windows.UTF16PtrFromString(parts[0])
+	if err != nil {
+		return err
+	}
+	parameters, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(parts[1:]))
+	if err != nil {
+		return err
+	}
+	workingDir, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return err
+	}
+	return windows.ShellExecute(0, nil, program, parameters, workingDir, 1)
 }
 
 func startProcess(executable string, args []string, dir string) error {

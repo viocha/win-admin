@@ -40,6 +40,7 @@ export interface InstalledApp {
     "installTimestamp": number;
     "estimatedSizeKB": number;
     "installLocation": string;
+    "registryPath": string;
     "scope": string;
     "architecture": string;
 }
@@ -52,6 +53,7 @@ export interface InstalledAppSize {
 export interface MenuEntry {
     "id": string;
     "label": string;
+    "displayLabel": string;
     "target": string;
     "kind": string;
     "command": string;

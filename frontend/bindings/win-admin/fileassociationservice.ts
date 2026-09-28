@@ -21,6 +21,10 @@ export function OpenDefaultApps(): $CancellablePromise<void> {
     return $Call.ByID(3842995933);
 }
 
+export function OpenRegistry(extension: string): $CancellablePromise<void> {
+    return $Call.ByID(216815039, extension);
+}
+
 export function Rename(previousExtension: string, extension: string, command: string): $CancellablePromise<$models.FileAssociation> {
     return $Call.ByID(2850329138, previousExtension, extension, command);
 }

@@ -18,6 +18,14 @@ export function List(): $CancellablePromise<$models.InstalledApp[] | null> {
     return $Call.ByID(144482274);
 }
 
+export function OpenInstallLocation(id: string): $CancellablePromise<void> {
+    return $Call.ByID(915393342, id);
+}
+
+export function OpenRegistry(id: string): $CancellablePromise<void> {
+    return $Call.ByID(2784725749, id);
+}
+
 export function Sizes(ids: string[] | null): $CancellablePromise<$models.InstalledAppSize[] | null> {
     return $Call.ByID(1548451244, ids);
 }

@@ -1,18 +1,20 @@
 import type { MenuEntry } from "../../../bindings/win-admin"
 
-export type TargetType = "file" | "directory" | "background"
+export type TargetType = "file" | "directory" | "background" | "desktop-background"
 export type MenuKind = "command" | "submenu"
 
 export const TARGETS: Array<{ value: TargetType; label: string }> = [
   { value: "file", label: "文件" },
   { value: "directory", label: "目录" },
   { value: "background", label: "目录背景" },
+  { value: "desktop-background", label: "桌面背景" },
 ]
 
 export const TARGET_LABEL: Record<string, string> = {
   file: "文件",
   directory: "目录",
   background: "目录背景",
+  "desktop-background": "桌面背景",
 }
 
 export function shellMenuDisplayLabel(value: string): string {
@@ -35,6 +37,7 @@ export function createEmptyEntry(target: TargetType, kind: MenuKind = "command")
   return {
     id: "",
     label: "",
+    displayLabel: "",
     target,
     kind,
     command: "",

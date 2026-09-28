@@ -4,9 +4,13 @@ import {
   ArrowDownIcon,
   ArrowUpDownIcon,
   ArrowUpIcon,
+  CopyIcon,
+  FolderOpenIcon,
+  ListTreeIcon,
   LoaderCircleIcon,
   RefreshCwIcon,
   SearchIcon,
+  Trash2Icon,
 } from "lucide-react"
 
 import {
@@ -14,6 +18,13 @@ import {
   type InstalledApp,
 } from "../../../bindings/win-admin"
 import { Button } from "@/components/ui/button"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import {
   InputGroup,
@@ -133,6 +144,30 @@ export function AppUninstallPage({ active }: { active: boolean }) {
     }
   }
 
+  const openInstallLocation = async (app: InstalledApp) => {
+    try {
+      await AppUninstallService.OpenInstallLocation(app.id)
+    } catch (reason) {
+      showError(reason, "无法打开安装位置")
+    }
+  }
+
+  const openRegistry = async (app: InstalledApp) => {
+    try {
+      await AppUninstallService.OpenRegistry(app.id)
+    } catch (reason) {
+      showError(reason, "无法打开注册表位置")
+    }
+  }
+
+  const copyRegistryPath = async (app: InstalledApp) => {
+    try {
+      await navigator.clipboard.writeText(app.registryPath)
+    } catch (reason) {
+      showError(reason, "无法复制注册表路径")
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col p-4 lg:p-6">
       <div className="flex shrink-0 flex-col gap-3">
@@ -180,38 +215,59 @@ export function AppUninstallPage({ active }: { active: boolean }) {
                 </TableHeader>
                 <TableBody>
                   {visibleApps.map((app) => (
-                    <TableRow key={app.id}>
-                      <TableCell className="min-w-0">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/40">
-                            {app.icon ? (
-                              <img src={app.icon} alt="" className="size-6 object-contain" />
-                            ) : (
-                              <AppWindowIcon className="size-4 text-muted-foreground" />
-                            )}
+                    <ContextMenu key={app.id}>
+                      <ContextMenuTrigger render={<TableRow />}>
+                        <TableCell className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/40">
+                              {app.icon ? (
+                                <img src={app.icon} alt="" className="size-6 object-contain" />
+                              ) : (
+                                <AppWindowIcon className="size-4 text-muted-foreground" />
+                              )}
+                            </div>
+                            <TruncatedText value={app.name} className="font-medium" />
                           </div>
-                          <TruncatedText value={app.name} className="font-medium" />
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden min-w-0 text-xs text-muted-foreground lg:table-cell">
-                        <TruncatedText value={app.publisher || "—"} />
-                      </TableCell>
-                      <TableCell className="hidden min-w-0 text-xs text-muted-foreground md:table-cell">
-                        <TruncatedText value={app.version || "—"} />
-                      </TableCell>
-                      <TableCell className="text-xs tabular-nums text-muted-foreground">{app.installDate || "—"}</TableCell>
-                      <TableCell className="text-right text-xs tabular-nums text-muted-foreground">{formatSize(app.estimatedSizeKB)}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void uninstall(app)}
-                          disabled={uninstallingId === app.id}
-                        >
+                        </TableCell>
+                        <TableCell className="hidden min-w-0 text-xs text-muted-foreground lg:table-cell">
+                          <TruncatedText value={app.publisher || "—"} />
+                        </TableCell>
+                        <TableCell className="hidden min-w-0 text-xs text-muted-foreground md:table-cell">
+                          <TruncatedText value={app.version || "—"} />
+                        </TableCell>
+                        <TableCell className="text-xs tabular-nums text-muted-foreground">{app.installDate || "—"}</TableCell>
+                        <TableCell className="text-right text-xs tabular-nums text-muted-foreground">{formatSize(app.estimatedSizeKB)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void uninstall(app)}
+                            disabled={uninstallingId === app.id}
+                          >
+                            卸载
+                          </Button>
+                        </TableCell>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="min-w-max">
+                        <ContextMenuItem onClick={() => void openInstallLocation(app)} disabled={!app.installLocation}>
+                          <FolderOpenIcon />
+                          打开安装位置
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => void openRegistry(app)}>
+                          <ListTreeIcon />
+                          打开注册表位置
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => void copyRegistryPath(app)}>
+                          <CopyIcon />
+                          复制注册表路径
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => void uninstall(app)} disabled={uninstallingId === app.id}>
+                          <Trash2Icon />
                           卸载
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   ))}
                 </TableBody>
               </Table>
@@ -287,4 +343,3 @@ function formatSize(sizeKB: number): string {
   const sizeGB = sizeMB / 1024
   return `${sizeGB < 10 ? sizeGB.toFixed(1) : Math.round(sizeGB)} GB`
 }
-

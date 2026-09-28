@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -124,7 +125,7 @@ func menuSourcesForTarget(target string) ([]menuRegistrySource, error) {
 		addPair(classesRoot+`\AllFileSystemObjects\shellex\ContextMenuHandlers`, "handler")
 	case "background":
 		addPair(classesRoot+`\Directory\Background\shellex\ContextMenuHandlers`, "handler")
-		addPair(classesRoot+`\DesktopBackground\shell`, "static")
+	case "desktop-background":
 		addPair(classesRoot+`\DesktopBackground\shellex\ContextMenuHandlers`, "handler")
 	}
 	return sources, nil
@@ -206,6 +207,7 @@ func readContextMenuHandlers(source menuRegistrySource, target string) ([]MenuEn
 		entries = append(entries, MenuEntry{
 			ID:              readOnlyMenuID(registryPath),
 			Label:           label,
+			DisplayLabel:    resolveMenuLabel(label),
 			Target:          target,
 			Kind:            "command",
 			Command:         server,
@@ -352,6 +354,23 @@ func (s *ContextMenuService) Delete(registryPath string) error {
 	return nil
 }
 
+func (s *ContextMenuService) OpenRegistry(registryPath string) error {
+	root, hive, path, err := parseMenuRegistryPath(registryPath)
+	if err != nil {
+		return err
+	}
+	key, err := registry.OpenKey(root, path, registry.QUERY_VALUE)
+	if err != nil {
+		return fmt.Errorf("读取菜单注册表项失败: %w", err)
+	}
+	key.Close()
+	fullHive := "HKEY_CURRENT_USER"
+	if hive == "HKLM" {
+		fullHive = "HKEY_LOCAL_MACHINE"
+	}
+	return openRegistryKey(fullHive + `\` + path)
+}
+
 func (s *ContextMenuService) SetEnabled(registryPath string, enabled bool) error {
 	root, _, path, err := parseMenuRegistryPath(registryPath)
 	if err != nil {
@@ -496,6 +515,8 @@ func targetShellPath(target string) (string, error) {
 		return classesRoot + `\Directory\shell`, nil
 	case "background":
 		return classesRoot + `\Directory\Background\shell`, nil
+	case "desktop-background":
+		return classesRoot + `\DesktopBackground\shell`, nil
 	default:
 		return "", fmt.Errorf("不支持的目标类型: %s", target)
 	}
@@ -527,6 +548,7 @@ func readMenuEntryAt(root registry.Key, hive, parentPath, id, target string, dep
 	entry := MenuEntry{
 		ID:           id,
 		Label:        label,
+		DisplayLabel: resolveMenuLabel(label),
 		Target:       target,
 		Icon:         readString(key, "Icon"),
 		Position:     strings.ToLower(readString(key, "Position")),
@@ -613,6 +635,9 @@ func readCommandAt(root registry.Key, path string) string {
 		return ""
 	}
 	defer key.Close()
+	if command := readString(key, associationCommandValue); command != "" {
+		return command
+	}
 	return readString(key, "")
 }
 
@@ -622,6 +647,33 @@ func readString(key registry.Key, name string) string {
 		return ""
 	}
 	return value
+}
+
+var shLoadIndirectString = windows.NewLazySystemDLL("shlwapi.dll").NewProc("SHLoadIndirectString")
+
+func resolveMenuLabel(label string) string {
+	if !strings.HasPrefix(label, "@") {
+		return label
+	}
+	source, err := windows.UTF16PtrFromString(label)
+	if err != nil {
+		return label
+	}
+	buffer := make([]uint16, 4096)
+	result, _, _ := shLoadIndirectString.Call(
+		uintptr(unsafe.Pointer(source)),
+		uintptr(unsafe.Pointer(&buffer[0])),
+		uintptr(len(buffer)),
+		0,
+	)
+	if result != 0 {
+		return label
+	}
+	resolved := windows.UTF16ToString(buffer)
+	if resolved == "" {
+		return label
+	}
+	return resolved
 }
 
 func hasValue(key registry.Key, name string) bool {
@@ -709,15 +761,39 @@ func writeMenuEntry(parentPath string, entry MenuEntry) error {
 	if command == "" {
 		return fmt.Errorf("菜单 %q 缺少命令", entry.Label)
 	}
+	registryCommand, err := menuRegistryCommand(command, entry.Target, path)
+	if err != nil {
+		return err
+	}
 	commandKey, _, err := registry.CreateKey(registry.LOCAL_MACHINE, path+`\command`, registry.ALL_ACCESS)
 	if err != nil {
 		return fmt.Errorf("创建命令注册表失败: %w", err)
 	}
 	defer commandKey.Close()
-	if err := commandKey.SetStringValue("", command); err != nil {
+	if registryCommand != command {
+		if err := commandKey.SetStringValue(associationCommandValue, command); err != nil {
+			return fmt.Errorf("写入原始命令失败: %w", err)
+		}
+	}
+	if err := commandKey.SetStringValue("", registryCommand); err != nil {
 		return fmt.Errorf("写入命令失败: %w", err)
 	}
 	return nil
+}
+
+func menuRegistryCommand(command, target, path string) (string, error) {
+	if !strings.Contains(command, "%u") {
+		return command, nil
+	}
+	launcher, err := associationLauncherPath()
+	if err != nil {
+		return "", err
+	}
+	placeholder := "%1"
+	if target == "background" || target == "desktop-background" {
+		placeholder = "%V"
+	}
+	return fmt.Sprintf(`"%s" --menu "%s" "%s"`, launcher, path+`\command`, placeholder), nil
 }
 
 func normalizeMenuExtensions(value string) (string, error) {

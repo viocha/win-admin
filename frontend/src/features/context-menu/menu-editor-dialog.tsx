@@ -8,6 +8,7 @@ import {
   FolderIcon,
   FolderOpenIcon,
   FolderTreeIcon,
+  MonitorIcon,
   PencilIcon,
   PlusIcon,
   SaveIcon,
@@ -156,6 +157,8 @@ export function MenuEditorDialog({
                           <FileCode2Icon data-icon="inline-start" />
                         ) : target.value === "directory" ? (
                           <FolderIcon data-icon="inline-start" />
+                        ) : target.value === "desktop-background" ? (
+                          <MonitorIcon data-icon="inline-start" />
                         ) : (
                           <FolderOpenIcon data-icon="inline-start" />
                         )}
@@ -355,11 +358,11 @@ type CommandFieldProps = {
 }
 
 function CommandField({ value, target, onChange }: CommandFieldProps) {
-  const pathPlaceholder = target === "background" ? "%V" : "%1"
+  const pathPlaceholder = target === "background" || target === "desktop-background" ? "%V" : "%1"
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const selectionRef = useRef<{ start: number; end: number } | null>(null)
 
-  const insertPath = () => {
+  const insertPlaceholder = (placeholder: string) => {
     const textarea = textareaRef.current
     if (!textarea) return
     const selection = selectionRef.current ?? (
@@ -370,27 +373,28 @@ function CommandField({ value, target, onChange }: CommandFieldProps) {
     selectionRef.current = null
     textarea.focus()
     textarea.setSelectionRange(selection.start, selection.end)
-    document.execCommand("insertText", false, `"${pathPlaceholder}"`)
+    document.execCommand("insertText", false, `"${placeholder}"`)
+  }
+
+  const rememberSelection = () => {
+    const textarea = textareaRef.current
+    selectionRef.current = textarea && document.activeElement === textarea
+      ? { start: textarea.selectionStart, end: textarea.selectionEnd }
+      : null
   }
 
   return (
     <Field className="min-w-0">
       <div className="flex items-center justify-between gap-3">
         <FieldLabel>命令</FieldLabel>
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          onPointerDown={() => {
-            const textarea = textareaRef.current
-            selectionRef.current = textarea && document.activeElement === textarea
-              ? { start: textarea.selectionStart, end: textarea.selectionEnd }
-              : null
-          }}
-          onClick={insertPath}
-        >
-          插入路径
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" size="xs" onPointerDown={rememberSelection} onClick={() => insertPlaceholder(pathPlaceholder)}>
+            插入路径
+          </Button>
+          <Button type="button" variant="outline" size="xs" onPointerDown={rememberSelection} onClick={() => insertPlaceholder("%u")}>
+            插入 URL
+          </Button>
+        </div>
       </div>
       <Textarea
         ref={textareaRef}

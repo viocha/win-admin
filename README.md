@@ -12,11 +12,12 @@ Win Admin 是一个基于 Wails v3 的 Windows 系统管理工具，当前包含
 
 ## 当前功能
 
-上下文菜单支持三个 Explorer 目标：
+上下文菜单支持四个 Explorer 目标：
 
 - 文件：`HKLM\Software\Classes\*\shell`
 - 目录：`HKLM\Software\Classes\Directory\shell`
 - 目录背景：`HKLM\Software\Classes\Directory\Background\shell`
+- 桌面背景：`HKLM\Software\Classes\DesktopBackground\shell`
 
 支持：
 
@@ -25,7 +26,8 @@ Win Admin 是一个基于 Wails v3 的 Windows 系统管理工具，当前包含
 - 普通命令与递归多级菜单
 - 直接使用 Windows 原生目标占位符
 - 文件和目录使用 `%1`
-- 目录背景使用 `%V`
+- 目录背景和桌面背景使用 `%V`
+- 在 win-admin 管理的菜单命令中使用 `%u`，将目标路径转换为 `file:///` 地址；包含 `%u` 的命令会通过非提权启动器执行
 - 从命令推断图标来源
 - 选择 EXE、DLL 或 ICO 作为图标来源
 - `Position=Top` / `Bottom`
@@ -65,7 +67,8 @@ Win Admin 是一个基于 Wails v3 的 Windows 系统管理工具，当前包含
 - 按名称、版本和发布者过滤
 - 表格展示名称、发布者、版本、安装时间和注册表估算大小
 - 点击名称、安装时间或大小表头排序，再次点击切换升降序
-- 通过确认对话框触发应用注册的原生卸载程序
+- 通过卸载按钮或右键菜单运行应用注册的原生卸载程序
+- 右键打开安装位置、定位卸载注册表项或复制注册表路径
 - 卸载命令只在后端重新读取和执行，不暴露给前端
 
 ## 管理员权限

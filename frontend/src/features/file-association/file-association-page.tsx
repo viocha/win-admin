@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { CopyIcon, ExternalLinkIcon, LoaderCircleIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
+import { CopyIcon, ExternalLinkIcon, ListTreeIcon, LoaderCircleIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
 
 import { FileAssociationService, type FileAssociation } from "../../../bindings/win-admin"
 import { Badge } from "@/components/ui/badge"
@@ -110,6 +110,14 @@ export function FileAssociationPage({ active }: { active: boolean }) {
     }
   }
 
+  const openRegistry = async (item: FileAssociation) => {
+    try {
+      await FileAssociationService.OpenRegistry(item.extension)
+    } catch (reason) {
+      showError(reason, "无法打开注册表位置")
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col p-4 lg:p-6">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
@@ -177,6 +185,10 @@ export function FileAssociationPage({ active }: { active: boolean }) {
                       编辑
                     </ContextMenuItem>
                     <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => void openRegistry(item)}>
+                      <ListTreeIcon />
+                      打开注册表位置
+                    </ContextMenuItem>
                     <ContextMenuItem
                       className="whitespace-nowrap"
                       onClick={() => navigator.clipboard.writeText(item.registryPath)}

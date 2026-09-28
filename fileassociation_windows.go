@@ -354,6 +354,20 @@ func (s *FileAssociationService) OpenDefaultApps() error {
 	return nil
 }
 
+func (s *FileAssociationService) OpenRegistry(extension string) error {
+	extension, err := normalizeAssociationExtension(extension)
+	if err != nil {
+		return err
+	}
+	path := associationClasses + associationProgID(extension)
+	key, err := registry.OpenKey(registry.CURRENT_USER, path, registry.QUERY_VALUE)
+	if err != nil {
+		return fmt.Errorf("读取打开方式注册表项失败: %w", err)
+	}
+	key.Close()
+	return openRegistryKey(`HKEY_CURRENT_USER\` + path)
+}
+
 func setAssociationValue(path, name, value string) error {
 	key, _, err := registry.CreateKey(registry.CURRENT_USER, path, registry.SET_VALUE)
 	if err != nil {

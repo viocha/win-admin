@@ -36,3 +36,18 @@ func TestFindInstalledAppExecutable(t *testing.T) {
 		t.Fatalf("executable = %q, want %q", got, want)
 	}
 }
+
+func TestInstalledAppRegistryPath(t *testing.T) {
+	for _, test := range []struct {
+		location uninstallRegistryLocation
+		want     string
+	}{
+		{uninstallLocations[0], `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Demo`},
+		{uninstallLocations[1], `HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Demo`},
+		{uninstallLocations[2], `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Demo`},
+	} {
+		if got := installedAppRegistryPath(test.location, "Demo"); got != test.want {
+			t.Errorf("installedAppRegistryPath() = %q, want %q", got, test.want)
+		}
+	}
+}

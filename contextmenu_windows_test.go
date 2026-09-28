@@ -3,9 +3,26 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestResolveMenuLabel(t *testing.T) {
+	if got := resolveMenuLabel("普通菜单"); got != "普通菜单" {
+		t.Fatalf("普通名称被修改: %q", got)
+	}
+	const dll = `C:\Program Files (x86)\Common Files\Microsoft Shared\MSEnv\2052\VSLauncherUI.dll`
+	if _, err := os.Stat(dll); err != nil {
+		t.Skip("本机没有 VSLauncherUI.dll")
+	}
+	const indirect = `@` + dll + `,-1002`
+	resolved := resolveMenuLabel(indirect)
+	if resolved == "" || resolved == indirect {
+		t.Fatalf("未解析间接资源字符串: %q", resolved)
+	}
+	t.Logf("%s => %s", indirect, resolved)
+}
 
 func TestFirstCommandToken(t *testing.T) {
 	tests := []struct {
@@ -67,6 +84,42 @@ func TestValidVerbID(t *testing.T) {
 		if validVerbID(value) {
 			t.Errorf("expected %q to be invalid", value)
 		}
+	}
+}
+
+func TestBackgroundMenuSourcesAreSeparate(t *testing.T) {
+	for _, test := range []struct {
+		target string
+		want   string
+		other  string
+	}{
+		{"background", `\Directory\Background\`, `\DesktopBackground\`},
+		{"desktop-background", `\DesktopBackground\`, `\Directory\Background\`},
+	} {
+		sources, err := menuSourcesForTarget(test.target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sources) == 0 || !strings.Contains(sources[0].path, test.want) || sources[0].readOnly {
+			t.Fatalf("%s 的可编辑主路径不符: %#v", test.target, sources)
+		}
+		for _, source := range sources {
+			if strings.Contains(source.path, test.other) {
+				t.Errorf("%s 混入其他背景路径: %s", test.target, source.path)
+			}
+		}
+	}
+}
+
+func TestMenuRegistryCommand(t *testing.T) {
+	const path = `Software\Classes\Directory\Background\shell\Example`
+	plain, err := menuRegistryCommand(`pwsh -WorkingDirectory "%V"`, "background", path)
+	if err != nil || plain != `pwsh -WorkingDirectory "%V"` {
+		t.Fatalf("普通菜单命令被改写: %q, %v", plain, err)
+	}
+	wrapped, err := menuRegistryCommand(`msedge --app="%u"`, "background", path)
+	if err != nil || !strings.Contains(wrapped, ` --menu "`+path+`\command" "%V"`) {
+		t.Fatalf("URL 菜单命令未传递背景路径: %q, %v", wrapped, err)
 	}
 }
 

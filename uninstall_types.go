@@ -13,6 +13,7 @@ type InstalledApp struct {
 	InstallTimestamp int64  `json:"installTimestamp"`
 	EstimatedSizeKB  uint64 `json:"estimatedSizeKB"`
 	InstallLocation  string `json:"installLocation"`
+	RegistryPath     string `json:"registryPath"`
 	Scope            string `json:"scope"`
 	Architecture     string `json:"architecture"`
 }

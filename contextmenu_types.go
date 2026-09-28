@@ -7,6 +7,7 @@ type ContextMenuService struct{}
 type MenuEntry struct {
 	ID              string      `json:"id"`
 	Label           string      `json:"label"`
+	DisplayLabel    string      `json:"displayLabel"`
 	Target          string      `json:"target"`
 	Kind            string      `json:"kind"`
 	Command         string      `json:"command"`

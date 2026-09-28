@@ -5,7 +5,10 @@ import {
   FileCode2Icon,
   FolderIcon,
   FolderOpenIcon,
+  ListTreeIcon,
   LoaderCircleIcon,
+  MonitorIcon,
+  PencilIcon,
   PlusIcon,
   PowerIcon,
   RefreshCwIcon,
@@ -128,12 +131,16 @@ export function ContextMenuPage({ active }: { active: boolean }) {
     const keyword = query.trim().toLowerCase()
     if (!keyword) return entries
     return entries.filter((entry) =>
-      [entry.label, shellMenuDisplayLabel(entry.label), entry.command, entry.icon, entry.id]
+      [entry.label, entry.displayLabel, shellMenuDisplayLabel(entry.displayLabel || entry.label), entry.command, entry.icon, entry.id]
         .join("\n")
         .toLowerCase()
         .includes(keyword),
     )
   }, [entries, query])
+  const entryGroups = [
+    { label: "可编辑", entries: visibleEntries.filter((entry) => entry.canEdit && !entry.readOnly) },
+    { label: "不可编辑", entries: visibleEntries.filter((entry) => !entry.canEdit || entry.readOnly) },
+  ]
 
   const openCreate = () => {
     setEditorEntry(createEmptyEntry(target))
@@ -231,6 +238,14 @@ export function ContextMenuPage({ active }: { active: boolean }) {
     }
   }
 
+  const openRegistry = async (entry: MenuEntry) => {
+    try {
+      await ContextMenuService.OpenRegistry(entry.registryPath)
+    } catch (reason) {
+      showError(reason, "无法打开注册表位置")
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col p-4 lg:p-6">
       <div className="flex shrink-0 flex-col gap-3">
@@ -252,8 +267,8 @@ export function ContextMenuPage({ active }: { active: boolean }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2">
-        <Tabs className="min-w-[22rem] flex-[1_1_28rem]" value={target} onValueChange={(value) => setTarget(value as TargetType)}>
-          <TabsList className="grid w-full grid-cols-3">
+        <Tabs className="min-w-[30rem] flex-[1_1_32rem]" value={target} onValueChange={(value) => setTarget(value as TargetType)}>
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="file">
               <FileCode2Icon data-icon="inline-start" />
               文件
@@ -265,6 +280,10 @@ export function ContextMenuPage({ active }: { active: boolean }) {
             <TabsTrigger value="background">
               <FolderOpenIcon data-icon="inline-start" />
               目录背景
+            </TabsTrigger>
+            <TabsTrigger value="desktop-background">
+              <MonitorIcon data-icon="inline-start" />
+              桌面背景
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -290,20 +309,28 @@ export function ContextMenuPage({ active }: { active: boolean }) {
           <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
         </div>
       ) : visibleEntries.length ? (
-        <div className="overflow-hidden rounded-lg border bg-card">
-          {visibleEntries.map((entry) => (
-            <MenuCard
-              key={entry.id}
-              entry={entry}
-              onEdit={() => openEdit(entry)}
-              onDelete={() => {
-                setDeleteEntry(entry)
-                setDeleteOpen(true)
-              }}
-              onEnabledChange={(enabled) => void toggleEnabled(entry, enabled)}
-              onPositionChange={(position) => void changePosition(entry, position)}
-              onShiftOnlyChange={(shiftOnly) => void changeShiftOnly(entry, shiftOnly)}
-            />
+        <div className="flex flex-col gap-4">
+          {entryGroups.filter((group) => group.entries.length > 0).map((group) => (
+            <section key={group.label} className="flex flex-col gap-2">
+              <h2 className="px-1 text-xs font-medium text-muted-foreground">{group.label}</h2>
+              <div className="overflow-hidden rounded-lg border bg-card">
+                {group.entries.map((entry) => (
+                  <MenuCard
+                    key={entry.registryPath}
+                    entry={entry}
+                    onEdit={() => openEdit(entry)}
+                    onDelete={() => {
+                      setDeleteEntry(entry)
+                      setDeleteOpen(true)
+                    }}
+                    onOpenRegistry={() => void openRegistry(entry)}
+                    onEnabledChange={(enabled) => void toggleEnabled(entry, enabled)}
+                    onPositionChange={(position) => void changePosition(entry, position)}
+                    onShiftOnlyChange={(shiftOnly) => void changeShiftOnly(entry, shiftOnly)}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       ) : (
@@ -372,24 +399,32 @@ type MenuCardProps = {
   entry: MenuEntry
   onEdit: () => void
   onDelete: () => void
+  onOpenRegistry: () => void
   onEnabledChange: (enabled: boolean) => void
   onPositionChange: (position: "top" | "normal" | "bottom") => void
   onShiftOnlyChange: (shiftOnly: boolean) => void
 }
 
-function MenuCard({ entry, onEdit, onDelete, onEnabledChange, onPositionChange, onShiftOnlyChange }: MenuCardProps) {
+function MenuCard({ entry, onEdit, onDelete, onOpenRegistry, onEnabledChange, onPositionChange, onShiftOnlyChange }: MenuCardProps) {
   const command = entry.command
   const childCount = countChildren(entry)
-  const displayLabel = shellMenuDisplayLabel(entry.label)
+  const displayLabel = shellMenuDisplayLabel(entry.displayLabel || entry.label)
+  const canEdit = entry.canEdit && !entry.readOnly
+  const pendingEditRef = useRef(false)
 
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChangeComplete={(open) => {
+      if (!open && pendingEditRef.current) {
+        pendingEditRef.current = false
+        onEdit()
+      }
+    }}>
       <ContextMenuTrigger className="flex h-9 min-w-0 items-stretch border-b last:border-b-0 hover:bg-muted/30">
         <button
           type="button"
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 text-left disabled:cursor-default"
           onClick={onEdit}
-          disabled={entry.readOnly}
+          disabled={!canEdit}
         >
           <div className="flex size-6 shrink-0 items-center justify-center">
             <MenuIconPreview
@@ -427,6 +462,15 @@ function MenuCard({ entry, onEdit, onDelete, onEnabledChange, onPositionChange, 
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-max">
+        {canEdit ? (
+          <>
+            <ContextMenuItem onClick={() => { pendingEditRef.current = true }}>
+              <PencilIcon />
+              编辑
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        ) : null}
         <ContextMenuItem onClick={() => onEnabledChange(!entry.enabled)} disabled={!entry.canEnable}>
           <PowerIcon />
           {entry.enabled ? "禁用" : "启用"}
@@ -456,6 +500,10 @@ function MenuCard({ entry, onEdit, onDelete, onEnabledChange, onPositionChange, 
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSeparator />
+        <ContextMenuItem onClick={onOpenRegistry}>
+          <ListTreeIcon />
+          打开注册表位置
+        </ContextMenuItem>
         <ContextMenuItem
           className="whitespace-nowrap"
           onClick={() => navigator.clipboard.writeText(entry.registryPath)}
