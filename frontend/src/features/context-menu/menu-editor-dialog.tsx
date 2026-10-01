@@ -139,6 +139,8 @@ export function MenuEditorDialog({
                 />
               </Field>
 
+              <MenuOptionsField entry={draft} onChange={setDraft} />
+
               <FieldGroup className="flex min-w-0 flex-row flex-nowrap items-start gap-4">
                 <Field className="!w-fit shrink-0">
                   <FieldLabel>目标</FieldLabel>
@@ -225,15 +227,6 @@ export function MenuEditorDialog({
                   />
                 </Field>
               ) : null}
-
-			  <label className="flex min-h-9 cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 text-sm transition-colors hover:bg-muted/30">
-				<span>仅按住 Shift 时显示</span>
-				<Switch
-				  size="sm"
-				  checked={draft.shiftOnly}
-				  onCheckedChange={(shiftOnly) => setDraft({ ...draft, shiftOnly })}
-				/>
-			  </label>
 
               <IconField
                 icon={draft.icon}
@@ -355,6 +348,34 @@ type CommandFieldProps = {
   value: string
   target: string
   onChange: (value: string) => void
+}
+
+function MenuOptionsField({ entry, onChange }: {
+  entry: MenuEntry
+  onChange: (entry: MenuEntry) => void
+}) {
+  const options: Array<{ key: "enabled" | "shiftOnly" | "runAsAdmin"; label: string }> = [
+    { key: "enabled", label: "启用" },
+    { key: "shiftOnly", label: "仅按住 Shift 时显示" },
+  ]
+  if (entry.kind === "command") {
+    options.push({ key: "runAsAdmin", label: "以管理员身份运行" })
+  }
+
+  return (
+    <div className="divide-y overflow-hidden rounded-lg border">
+      {options.map(({ key, label }) => (
+        <label key={key} className="flex min-h-9 cursor-pointer items-center justify-between gap-3 px-3 text-sm transition-colors hover:bg-muted/30">
+          <span>{label}</span>
+          <Switch
+            size="sm"
+            checked={entry[key]}
+            onCheckedChange={(checked) => onChange({ ...entry, [key]: checked })}
+          />
+        </label>
+      ))}
+    </div>
+  )
 }
 
 function CommandField({ value, target, onChange }: CommandFieldProps) {
@@ -685,21 +706,14 @@ function NodeDetails({ node, target, onChange }: NodeDetailsProps) {
         <Input value={node.label} onChange={(event) => onChange({ ...node, label: event.target.value })} />
       </Field>
 
+      <MenuOptionsField entry={node} onChange={onChange} />
+
       <IconField
         icon={node.icon}
         command={node.command}
         kind={node.kind as MenuKind}
         onChange={(icon) => onChange({ ...node, icon })}
       />
-
-	  <label className="flex min-h-9 cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 text-sm transition-colors hover:bg-muted/30">
-		<span>仅按住 Shift 时显示</span>
-		<Switch
-		  size="sm"
-		  checked={node.shiftOnly}
-		  onCheckedChange={(shiftOnly) => onChange({ ...node, shiftOnly })}
-		/>
-	  </label>
 
       {node.kind === "command" ? (
         <CommandField

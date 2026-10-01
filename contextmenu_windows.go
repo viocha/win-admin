@@ -554,6 +554,7 @@ func readMenuEntryAt(root registry.Key, hive, parentPath, id, target string, dep
 		Position:     strings.ToLower(readString(key, "Position")),
 		Extensions:   parseMenuExtensions(readString(key, "AppliesTo")),
 		ShiftOnly:    hasValue(key, "Extended"),
+		RunAsAdmin:   readString(key, "WinAdminRunAsAdmin") == "1",
 		Enabled:      !hasValue(key, "LegacyDisable"),
 		Managed:      readString(key, "win-admin-managed") == "1",
 		ReadOnly:     forceReadOnly,
@@ -690,6 +691,10 @@ func hasValue(key registry.Key, name string) bool {
 }
 
 func writeMenuEntry(parentPath string, entry MenuEntry) error {
+	return writeMenuEntryAt(registry.LOCAL_MACHINE, parentPath, entry)
+}
+
+func writeMenuEntryAt(root registry.Key, parentPath string, entry MenuEntry) error {
 	if entry.ID == "" {
 		entry.ID = newVerbID(entry.Label)
 	}
@@ -697,7 +702,7 @@ func writeMenuEntry(parentPath string, entry MenuEntry) error {
 		return errors.New("无效的菜单 ID")
 	}
 	path := parentPath + `\` + entry.ID
-	key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, path, registry.ALL_ACCESS)
+	key, _, err := registry.CreateKey(root, path, registry.ALL_ACCESS)
 	if err != nil {
 		return fmt.Errorf("创建菜单注册表失败: %w", err)
 	}
@@ -747,7 +752,7 @@ func writeMenuEntry(parentPath string, entry MenuEntry) error {
 			if child.Kind == "" {
 				child.Kind = "command"
 			}
-			if err := writeMenuEntry(shellPath, child); err != nil {
+			if err := writeMenuEntryAt(root, shellPath, child); err != nil {
 				return err
 			}
 		}
@@ -761,11 +766,19 @@ func writeMenuEntry(parentPath string, entry MenuEntry) error {
 	if command == "" {
 		return fmt.Errorf("菜单 %q 缺少命令", entry.Label)
 	}
-	registryCommand, err := menuRegistryCommand(command, entry.Target, path)
+	if entry.RunAsAdmin {
+		if err := key.SetStringValue("WinAdminRunAsAdmin", "1"); err != nil {
+			return fmt.Errorf("写入管理员运行设置失败: %w", err)
+		}
+		if err := key.SetStringValue("HasLUAShield", ""); err != nil {
+			return err
+		}
+	}
+	registryCommand, err := menuRegistryCommand(command, entry.Target, path, entry.RunAsAdmin)
 	if err != nil {
 		return err
 	}
-	commandKey, _, err := registry.CreateKey(registry.LOCAL_MACHINE, path+`\command`, registry.ALL_ACCESS)
+	commandKey, _, err := registry.CreateKey(root, path+`\command`, registry.ALL_ACCESS)
 	if err != nil {
 		return fmt.Errorf("创建命令注册表失败: %w", err)
 	}
@@ -781,8 +794,8 @@ func writeMenuEntry(parentPath string, entry MenuEntry) error {
 	return nil
 }
 
-func menuRegistryCommand(command, target, path string) (string, error) {
-	if !strings.Contains(command, "%u") {
+func menuRegistryCommand(command, target, path string, runAsAdmin bool) (string, error) {
+	if !runAsAdmin && !strings.Contains(command, "%u") {
 		return command, nil
 	}
 	launcher, err := associationLauncherPath()

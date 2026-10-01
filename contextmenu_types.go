@@ -16,6 +16,7 @@ type MenuEntry struct {
 	Position        string      `json:"position"`
 	Extensions      string      `json:"extensions"`
 	ShiftOnly       bool        `json:"shiftOnly"`
+	RunAsAdmin      bool        `json:"runAsAdmin"`
 	Enabled         bool        `json:"enabled"`
 	Managed         bool        `json:"managed"`
 	ReadOnly        bool        `json:"readOnly"`

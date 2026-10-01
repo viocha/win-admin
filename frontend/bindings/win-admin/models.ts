@@ -62,6 +62,7 @@ export interface MenuEntry {
     "position": string;
     "extensions": string;
     "shiftOnly": boolean;
+    "runAsAdmin": boolean;
     "enabled": boolean;
     "managed": boolean;
     "readOnly": boolean;

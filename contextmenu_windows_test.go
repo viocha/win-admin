@@ -3,10 +3,64 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/windows/registry"
 )
+
+func TestMenuRunAsAdminRoundTrip(t *testing.T) {
+	parent := fmt.Sprintf(`Software\WinAdminTests\%s-%d`, t.Name(), os.Getpid())
+	t.Cleanup(func() {
+		if err := deleteTreeIfExists(registry.CURRENT_USER, parent); err != nil {
+			t.Errorf("清理测试注册表失败: %v", err)
+		}
+	})
+	entry := MenuEntry{
+		ID: "Example", Label: "测试菜单", Target: "background", Kind: "submenu", Enabled: true,
+		Children: []MenuEntry{{
+			ID: "Command", Label: "测试命令", Kind: "command", Enabled: true,
+			Command: `pwsh -NoLogo -WorkingDirectory "%V"`, RunAsAdmin: true,
+		}},
+	}
+	for _, enabled := range []bool{true, false} {
+		if err := deleteTreeIfExists(registry.CURRENT_USER, parent+`\Example`); err != nil {
+			t.Fatal(err)
+		}
+		entry.Children[0].RunAsAdmin = enabled
+		if err := writeMenuEntryAt(registry.CURRENT_USER, parent, entry); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readMenuEntryAt(registry.CURRENT_USER, "HKCU", parent, entry.ID, entry.Target, 0, false)
+		if err != nil || len(got.Children) != 1 {
+			t.Fatalf("读取子菜单失败: %#v, %v", got, err)
+		}
+		child := got.Children[0]
+		if child.RunAsAdmin != enabled || child.Command != entry.Children[0].Command {
+			t.Fatalf("管理员选项或命令未正确回读: %#v", child)
+		}
+		key, err := registry.OpenKey(registry.CURRENT_USER, parent+`\Example\shell\Command`, registry.QUERY_VALUE)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shield := hasValue(key, "HasLUAShield")
+		key.Close()
+		if shield != enabled {
+			t.Fatalf("管理员标记不符: %v", shield)
+		}
+		commandKey, err := registry.OpenKey(registry.CURRENT_USER, parent+`\Example\shell\Command\command`, registry.QUERY_VALUE)
+		if err != nil {
+			t.Fatal(err)
+		}
+		registered := readString(commandKey, "")
+		commandKey.Close()
+		if enabled && !strings.Contains(registered, " --menu ") || !enabled && registered != child.Command {
+			t.Fatalf("命令注册方式不符: %q", registered)
+		}
+	}
+}
 
 func TestResolveMenuLabel(t *testing.T) {
 	if got := resolveMenuLabel("普通菜单"); got != "普通菜单" {
@@ -113,13 +167,23 @@ func TestBackgroundMenuSourcesAreSeparate(t *testing.T) {
 
 func TestMenuRegistryCommand(t *testing.T) {
 	const path = `Software\Classes\Directory\Background\shell\Example`
-	plain, err := menuRegistryCommand(`pwsh -WorkingDirectory "%V"`, "background", path)
+	plain, err := menuRegistryCommand(`pwsh -WorkingDirectory "%V"`, "background", path, false)
 	if err != nil || plain != `pwsh -WorkingDirectory "%V"` {
 		t.Fatalf("普通菜单命令被改写: %q, %v", plain, err)
 	}
-	wrapped, err := menuRegistryCommand(`msedge --app="%u"`, "background", path)
+	wrapped, err := menuRegistryCommand(`msedge --app="%u"`, "background", path, false)
 	if err != nil || !strings.Contains(wrapped, ` --menu "`+path+`\command" "%V"`) {
 		t.Fatalf("URL 菜单命令未传递背景路径: %q, %v", wrapped, err)
+	}
+	for _, target := range []string{"file", "directory", "background", "desktop-background"} {
+		placeholder := "%1"
+		if target == "background" || target == "desktop-background" {
+			placeholder = "%V"
+		}
+		wrapped, err := menuRegistryCommand("pwsh -NoLogo", target, path, true)
+		if err != nil || !strings.Contains(wrapped, ` --menu "`+path+`\command" "`+placeholder+`"`) {
+			t.Fatalf("管理员菜单 %s 未使用启动器: %q, %v", target, wrapped, err)
+		}
 	}
 }
 

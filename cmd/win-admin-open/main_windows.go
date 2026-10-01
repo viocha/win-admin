@@ -96,6 +96,7 @@ func runMenu(args []string) error {
 		return fmt.Errorf("读取菜单失败: %w", err)
 	}
 	managed, _, managedErr := parent.GetStringValue("win-admin-managed")
+	runAsAdmin, _, _ := parent.GetStringValue("WinAdminRunAsAdmin")
 	parent.Close()
 	if managedErr != nil || managed != "1" {
 		return errors.New("菜单不属于 win-admin")
@@ -117,17 +118,26 @@ func runMenu(args []string) error {
 	if info, err := os.Stat(filePath); err == nil && info.IsDir() {
 		workingDir = filePath
 	}
-	if err := startMenuCommand(parts, workingDir); err != nil {
+	if err := startMenuCommand(parts, workingDir, runAsAdmin == "1"); err != nil {
 		return fmt.Errorf("运行菜单命令失败: %w", err)
 	}
 	return nil
 }
 
 func menuCommandParts(command, filePath string) ([]string, error) {
-	return fileassociation.CommandParts(strings.ReplaceAll(command, "%V", "%1"), filePath)
+	command = strings.ReplaceAll(command, "%V", "%1")
+	parts, err := fileassociation.CommandParts(command, filePath)
+	if err != nil {
+		return nil, err
+	}
+	// 菜单命令只替换显式占位符，不自动追加目标路径。
+	if !strings.Contains(command, "%1") && !strings.Contains(command, "%u") {
+		parts = parts[:len(parts)-1]
+	}
+	return parts, nil
 }
 
-func startMenuCommand(parts []string, dir string) error {
+func startMenuCommand(parts []string, dir string, runAsAdmin bool) error {
 	program, err := windows.UTF16PtrFromString(parts[0])
 	if err != nil {
 		return err
@@ -140,7 +150,14 @@ func startMenuCommand(parts []string, dir string) error {
 	if err != nil {
 		return err
 	}
-	return windows.ShellExecute(0, nil, program, parameters, workingDir, 1)
+	var operation *uint16
+	if runAsAdmin {
+		operation, err = windows.UTF16PtrFromString("runas")
+		if err != nil {
+			return err
+		}
+	}
+	return windows.ShellExecute(0, operation, program, parameters, workingDir, 1)
 }
 
 func startProcess(executable string, args []string, dir string) error {

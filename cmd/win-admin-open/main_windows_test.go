@@ -25,7 +25,11 @@ func TestCommandParts(t *testing.T) {
 
 func TestMenuCommandParts(t *testing.T) {
 	path := `D:\tmp\中文 目录\a#b.html`
-	parts, err := menuCommandParts(`msedge --app="%u" "%1"`, path)
+	parts, err := menuCommandParts(`pwsh -NoLogo`, path)
+	if err != nil || len(parts) != 2 || parts[0] != "pwsh" || parts[1] != "-NoLogo" {
+		t.Fatalf("无占位符的菜单命令不应追加路径: %#v, %v", parts, err)
+	}
+	parts, err = menuCommandParts(`msedge --app="%u" "%1"`, path)
 	if err != nil || len(parts) != 3 || parts[1] != `--app=file:///D:/tmp/%E4%B8%AD%E6%96%87%20%E7%9B%AE%E5%BD%95/a%23b.html` || parts[2] != path {
 		t.Fatalf("文件菜单参数不符: %#v, %v", parts, err)
 	}
