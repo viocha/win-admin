@@ -14,14 +14,17 @@ type MenuIconPreviewProps = {
 export function MenuIconPreview({ icon, command, kind, className }: MenuIconPreviewProps) {
   const [source, setSource] = useState("")
   const hasExplicitIcon = Boolean(icon.trim())
+  const iconSource = icon.trim() || commandExecutable(command)
 
   useEffect(() => {
     let cancelled = false
-    setSource("")
 
-    if (!icon.trim() && !command.trim()) return () => undefined
+    if (!iconSource) {
+      setSource("")
+      return
+    }
 
-    void ContextMenuService.IconPreview(icon, command)
+    void ContextMenuService.IconPreview(iconSource, "")
       .then((result) => {
         if (!cancelled) setSource(result || "")
       })
@@ -32,7 +35,7 @@ export function MenuIconPreview({ icon, command, kind, className }: MenuIconPrev
     return () => {
       cancelled = true
     }
-  }, [command, icon])
+  }, [iconSource])
 
   if (source) {
     return (
@@ -47,5 +50,15 @@ export function MenuIconPreview({ icon, command, kind, className }: MenuIconPrev
 
   const FallbackIcon = kind === "submenu" ? FolderTreeIcon : TerminalSquareIcon
   return <FallbackIcon className={cn("size-5 shrink-0 text-muted-foreground", className)} />
+}
+
+// 与后端 splitCommandExecutable 保持一致，图标来源只取命令中的程序名。
+function commandExecutable(command: string): string {
+  const value = command.trim()
+  if (value.startsWith('"')) {
+    const end = value.indexOf('"', 1)
+    if (end >= 0) return value.slice(1, end).trim()
+  }
+  return value.split(/[ \t\r\n]/, 1)[0].replace(/^"+|"+$/g, "")
 }
 
