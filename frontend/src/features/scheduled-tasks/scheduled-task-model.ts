@@ -43,7 +43,7 @@ export function createEmptyScheduledTask(): ScheduledTaskEdit {
     enabled: true,
     userId: "",
     logonType: 3,
-    runLevel: "highest",
+    runLevel: "least",
     action: {
       command: "",
       arguments: "",

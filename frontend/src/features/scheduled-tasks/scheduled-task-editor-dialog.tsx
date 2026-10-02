@@ -204,7 +204,7 @@ export function ScheduledTaskEditorDialog({
           <div className="flex min-w-0 items-center justify-between gap-3 pr-8">
             <DialogTitle className="min-w-0 truncate">{title ?? (previousPath ? "编辑计划任务" : "添加计划任务")}</DialogTitle>
             {allowXMLImport ? (
-              <Button variant="outline" size="sm" className="shrink-0" onClick={() => void importXML()} disabled={importingXML || saving}>
+              <Button variant="outline" size="sm" className="shrink-0" onClick={() => void importXML()} disabled={importingXML}>
                 {importingXML ? <LoaderCircleIcon data-icon="inline-start" className="size-4 self-center animate-spin" /> : <FileUpIcon data-icon="inline-start" />}
                 导入 XML
               </Button>
@@ -306,24 +306,16 @@ export function ScheduledTaskEditorDialog({
                   </Field>
                 ) : null}
 
-                <FieldGroup className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
-                  <SwitchRow
-                    label="启用"
-                    separated={false}
-                    checked={draft.enabled}
-                    onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
-                  />
-                  <SwitchRow
-                    label="最高权限"
-                    separated={false}
-                    icon={<ShieldCheckIcon className="size-4" />}
-                    checked={draft.runLevel === "highest"}
-                    onCheckedChange={(highest) => setDraft({
-                      ...draft,
-                      runLevel: highest ? "highest" : "least",
-                    })}
-                  />
-                </FieldGroup>
+                <SwitchRow
+                  label="最高权限"
+                  separated={false}
+                  icon={<ShieldCheckIcon className="size-4" />}
+                  checked={draft.runLevel === "highest"}
+                  onCheckedChange={(highest) => setDraft({
+                    ...draft,
+                    runLevel: highest ? "highest" : "least",
+                  })}
+                />
 
                 <Field>
                   <FieldLabel htmlFor="task-description">描述</FieldLabel>
@@ -667,13 +659,23 @@ export function ScheduledTaskEditorDialog({
           </ScrollArea>
         </Tabs>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            <XIcon data-icon="inline-start" />取消
-          </Button>
-          <Button onClick={() => void submit()} disabled={saving}>
-            <SaveIcon data-icon="inline-start" />保存
-          </Button>
+        <DialogFooter className="shrink-0 flex-col sm:items-center sm:justify-between">
+          <Field orientation="horizontal" className="w-auto">
+            <Switch
+              id="task-enabled"
+              checked={draft.enabled}
+              onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
+            />
+            <FieldLabel htmlFor="task-enabled" className="cursor-pointer">启用任务</FieldLabel>
+          </Field>
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+              <XIcon data-icon="inline-start" />取消
+            </Button>
+            <Button onClick={() => void submit()} disabled={saving}>
+              <SaveIcon data-icon="inline-start" />保存
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -787,4 +789,3 @@ function toDateTimeLocalValue(value: string): string {
   if (!value) return ""
   return value.length >= 16 ? value.slice(0, 16) : value
 }
-
