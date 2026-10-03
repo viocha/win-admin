@@ -103,7 +103,7 @@ export function ScheduledTaskTemplatesDialog({
             <DialogTitle>计划任务模板</DialogTitle>
           </DialogHeader>
 
-          <ScrollArea className="min-h-0 flex-1">
+          <ScrollArea className="-mr-4 min-h-0 flex-1 pr-4">
             {loading ? (
               <div className="flex min-h-full items-center justify-center" aria-label="加载中">
                 <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />

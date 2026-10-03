@@ -221,7 +221,7 @@ export function ScheduledTaskEditorDialog({
             <TabsTrigger value="settings">设置</TabsTrigger>
           </TabsList>
 
-          <ScrollArea className="min-h-0 min-w-0 flex-1 pr-3">
+          <ScrollArea className="-mr-4 min-h-0 min-w-0 flex-1 pr-4">
             <TabsContent value="general" className="m-0 px-1 py-2">
               <FieldGroup className="min-w-0 gap-4">
                 <FieldGroup className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">

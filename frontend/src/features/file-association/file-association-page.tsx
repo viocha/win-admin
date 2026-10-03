@@ -157,7 +157,7 @@ export function FileAssociationPage({ active }: { active: boolean }) {
             </EmptyHeader>
           </Empty>
         ) : (
-          <ScrollArea className="h-full min-w-0">
+          <ScrollArea className="-mr-4 h-full min-w-0 pr-4 lg:-mr-6 lg:pr-6">
             <div className="overflow-hidden rounded-lg border bg-card">
               <div className="hidden h-8 grid-cols-[7rem_minmax(0,1fr)_7rem] items-center gap-3 border-b bg-muted/20 px-3 text-xs text-muted-foreground md:grid">
                 <div>扩展名</div>

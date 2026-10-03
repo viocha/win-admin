@@ -5,6 +5,7 @@ import {
   ArrowUpToLineIcon,
   LoaderCircleIcon,
   PlusIcon,
+  TriangleAlertIcon,
   Trash2Icon,
 } from "lucide-react"
 
@@ -12,6 +13,7 @@ import {
   EnvironmentVariableService,
   type EnvironmentPathEntry,
 } from "../../../bindings/win-admin"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,7 +25,9 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
 import { showError } from "@/lib/error-toast"
+import { cn } from "@/lib/utils"
 
 type PathEditorDialogProps = {
   open: boolean
@@ -32,18 +36,28 @@ type PathEditorDialogProps = {
   onSaved: () => Promise<void>
 }
 
-type PathEntry = EnvironmentPathEntry & { validated: boolean }
+type PathEntry = EnvironmentPathEntry & { id: number; validated: boolean }
+
+function isMissingEntry(entry: PathEntry) {
+  return entry.validated && entry.value.trim() !== "" && !entry.exists
+}
 
 export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEditorDialogProps) {
   const [entries, setEntries] = useState<PathEntry[]>([])
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
+  const [selectedId, setSelectedId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const pendingFocusIndex = useRef<number | null>(null)
+  const nextEntryId = useRef(0)
+  const pendingFocusId = useRef<number | null>(null)
   const pendingScrollToTop = useRef(false)
+  const inputRefs = useRef(new Map<number, HTMLInputElement>())
+  const missingEntries = entries.filter(isMissingEntry)
+  const selectedIndex = selectedId === null ? -1 : entries.findIndex((entry) => entry.id === selectedId)
 
   const canMoveSelected = (offset: -1 | 1) => {
-    return selectedIndex !== null && selectedIndex + offset >= 0 && selectedIndex + offset < entries.length
+    if (selectedIndex < 0) return false
+    const target = selectedIndex + offset
+    return target >= 0 && target < entries.length
   }
 
   useEffect(() => {
@@ -52,8 +66,12 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
     void EnvironmentVariableService.GetPath(scope)
       .then((items) => {
         const next = items ?? []
-        setEntries(next.map((entry) => ({ ...entry, validated: true })))
-        setSelectedIndex(null)
+        setEntries(next.map((entry) => ({
+          ...entry,
+          id: nextEntryId.current++,
+          validated: true,
+        })))
+        setSelectedId(null)
       })
       .catch((reason) => showError(reason, "无法读取 PATH"))
       .finally(() => setLoading(false))
@@ -65,7 +83,16 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
     const timer = window.setTimeout(() => {
       void EnvironmentVariableService.AnalyzePath(scope, entries.map((entry) => entry.value))
         .then((items) => {
-          if (active) setEntries((items ?? []).map((entry) => ({ ...entry, validated: true })))
+          if (!active) return
+          const analyzed = items ?? []
+          setEntries((current) => {
+            if (analyzed.length !== current.length) return current
+            return current.map((entry, index) => ({
+              ...entry,
+              ...analyzed[index],
+              validated: true,
+            }))
+          })
         })
         .catch((reason) => {
           if (active) showError(reason, "PATH 检查失败")
@@ -84,18 +111,17 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
   }
 
   const moveSelected = (offset: -1 | 1) => {
-    if (!canMoveSelected(offset) || selectedIndex === null) return
+    if (!canMoveSelected(offset)) return
     const target = selectedIndex + offset
     setEntries((current) => {
       const next = [...current]
       ;[next[selectedIndex], next[target]] = [next[target], next[selectedIndex]]
       return next
     })
-    setSelectedIndex(target)
   }
 
   const moveSelectedToTop = () => {
-    if (selectedIndex === null || selectedIndex <= 0) return
+    if (selectedIndex <= 0) return
     pendingScrollToTop.current = true
     setEntries((current) => {
       const next = [...current]
@@ -103,22 +129,23 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
       next.unshift(entry)
       return next
     })
-    setSelectedIndex(0)
   }
 
-  const removeEntry = (index: number) => {
-    setEntries((current) => current.filter((_, itemIndex) => itemIndex !== index))
-    setSelectedIndex((current) => {
-      if (current === null) return null
-      if (current === index) return entries.length <= 1 ? null : Math.min(index, entries.length - 2)
-      return current > index ? current - 1 : current
-    })
+  const removeEntry = (id: number) => {
+    setEntries((current) => current.filter((entry) => entry.id !== id))
+    if (id === selectedId) setSelectedId(null)
+  }
+
+  const locateEntry = (id: number) => {
+    setSelectedId(id)
+    inputRefs.current.get(id)?.focus()
   }
 
   const addEntry = () => {
-    pendingFocusIndex.current = entries.length
-    setEntries((current) => [...current, { value: "", expanded: "", exists: false, validated: false }])
-    setSelectedIndex(entries.length)
+    const id = nextEntryId.current++
+    pendingFocusId.current = id
+    setEntries((current) => [...current, { id, value: "", expanded: "", exists: false, validated: false }])
+    setSelectedId(id)
   }
 
   const save = async () => {
@@ -142,7 +169,25 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-2">
-          <ScrollArea className="min-h-0 flex-1 pr-3">
+          {missingEntries.length > 0 ? (
+            <>
+              <Alert>
+                <TriangleAlertIcon />
+                <AlertTitle>发现 {missingEntries.length} 个无效路径</AlertTitle>
+                <AlertDescription className="flex flex-col gap-1">
+                  {missingEntries.map((entry) => (
+                    <div key={entry.id} className="flex min-w-0 items-center gap-1.5">
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.value}</span>
+                      <Button variant="ghost" size="xs" onClick={() => locateEntry(entry.id)}>定位</Button>
+                      <Button variant="ghost" size="xs" onClick={() => removeEntry(entry.id)}>删除</Button>
+                    </div>
+                  ))}
+                </AlertDescription>
+              </Alert>
+              <Separator />
+            </>
+          ) : null}
+          <ScrollArea className="-mr-4 min-h-0 flex-1 pr-4">
             {loading ? (
               <div className="flex min-h-full items-center justify-center" aria-label="加载中">
                 <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
@@ -151,14 +196,19 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
               <div className="flex flex-col gap-1">
                 {entries.map((entry, index) => (
                   <div
-                    key={index}
-                    className={`flex min-w-0 items-center gap-1.5 rounded-lg p-1 transition-colors ${selectedIndex === index ? "bg-muted/50" : ""}`}
+                    key={entry.id}
+                    className={cn(
+                      "flex min-w-0 items-center gap-1.5 rounded-lg p-1 transition-colors",
+                      selectedId === entry.id && "bg-muted/50"
+                    )}
                   >
                     <div className="relative min-w-0 flex-1">
                       <Input
                         ref={(input) => {
-                          if (input && pendingFocusIndex.current === index) {
-                            pendingFocusIndex.current = null
+                          if (input) inputRefs.current.set(entry.id, input)
+                          else inputRefs.current.delete(entry.id)
+                          if (input && pendingFocusId.current === entry.id) {
+                            pendingFocusId.current = null
                             input.focus()
                           }
                           if (input && index === 0 && pendingScrollToTop.current) {
@@ -169,15 +219,15 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
                         }}
                         value={entry.value}
                         onChange={(event) => updateEntry(index, event.target.value)}
-                        onFocus={() => setSelectedIndex(index)}
+                        onFocus={() => setSelectedId(entry.id)}
                         className="min-w-0 pr-16 font-mono text-xs"
                         aria-label={`PATH 项 ${index + 1}`}
                       />
-                      {entry.value.trim() && entry.validated && !entry.exists ? (
+                      {isMissingEntry(entry) ? (
                         <Badge variant="destructive" className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">不存在</Badge>
                       ) : null}
                     </div>
-                    <Button variant="ghost" size="icon-sm" onClick={() => removeEntry(index)} aria-label="删除 PATH 项">
+                    <Button variant="ghost" size="icon-sm" onClick={() => removeEntry(entry.id)} aria-label="删除 PATH 项">
                       <Trash2Icon />
                     </Button>
                   </div>
@@ -197,7 +247,7 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
               variant="ghost"
               size="icon-sm"
               onClick={moveSelectedToTop}
-              disabled={selectedIndex === null || selectedIndex <= 0 || saving || loading}
+              disabled={selectedIndex <= 0 || saving || loading}
               aria-label="置顶选中项"
             >
               <ArrowUpToLineIcon />

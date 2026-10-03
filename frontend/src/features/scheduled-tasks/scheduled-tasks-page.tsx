@@ -466,8 +466,8 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
         </InputGroup>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="flex min-h-full flex-col pt-3 pr-3 pb-1">
+      <ScrollArea className="-mr-4 min-h-0 flex-1 pr-4 lg:-mr-6 lg:pr-6">
+        <div className="flex min-h-full flex-col pt-3 pb-1">
         {loading ? (
           <div className="flex min-h-40 flex-1 items-center justify-center" aria-label="加载中">
             <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />

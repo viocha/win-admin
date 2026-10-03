@@ -126,7 +126,7 @@ export function MenuEditorDialog({
           <DialogTitle>{previousId ? "编辑上下文菜单" : "添加上下文菜单"}</DialogTitle>
         </DialogHeader>
 
-        <ScrollArea className="min-h-0 min-w-0 flex-1 pr-3">
+        <ScrollArea className="-mr-4 min-h-0 min-w-0 flex-1 pr-4">
           <div className="flex min-w-0 flex-col gap-3 p-1">
             <FieldGroup className="min-w-0 gap-3">
               <Field className="min-w-0">
