@@ -3,7 +3,6 @@ import {
   CalendarClockIcon,
   FileUpIcon,
   FolderOpenIcon,
-  LoaderCircleIcon,
   SaveIcon,
   ShieldCheckIcon,
   XIcon,
@@ -205,7 +204,7 @@ export function ScheduledTaskEditorDialog({
             <DialogTitle className="min-w-0 truncate">{title ?? (previousPath ? "编辑计划任务" : "添加计划任务")}</DialogTitle>
             {allowXMLImport ? (
               <Button variant="outline" size="sm" className="shrink-0" onClick={() => void importXML()} disabled={importingXML}>
-                {importingXML ? <LoaderCircleIcon data-icon="inline-start" className="size-4 self-center animate-spin" /> : <FileUpIcon data-icon="inline-start" />}
+                <FileUpIcon data-icon="inline-start" />
                 导入 XML
               </Button>
             ) : null}

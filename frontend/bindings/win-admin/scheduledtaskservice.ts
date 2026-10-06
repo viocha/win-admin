@@ -58,6 +58,13 @@ export function PickExecutable(): $CancellablePromise<string> {
     return $Call.ByID(676604466);
 }
 
+/**
+ * Restart 停止任务并确认没有运行或排队实例后，再启动任务。
+ */
+export function Restart(taskPath: string): $CancellablePromise<$models.ScheduledTaskSummary> {
+    return $Call.ByID(3203587142, taskPath);
+}
+
 export function Run(taskPath: string): $CancellablePromise<void> {
     return $Call.ByID(1946333768, taskPath);
 }

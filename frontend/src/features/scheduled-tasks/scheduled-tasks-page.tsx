@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { cn } from "cn"
 import {
   ChevronRightIcon,
   CopyPlusIcon,
@@ -13,6 +14,7 @@ import {
   PlusIcon,
   PowerIcon,
   RefreshCwIcon,
+  RotateCwIcon,
   SearchIcon,
   SquareIcon,
   Trash2Icon,
@@ -82,6 +84,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
   const [tasks, setTasks] = useState<ScheduledTaskSummary[]>([])
   const [folders, setFolders] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [query, setQuery] = useState("")
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorTask, setEditorTask] = useState<ScheduledTaskEdit | null>(null)
@@ -91,7 +94,9 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
   const [editingTemplate, setEditingTemplate] = useState<ScheduledTaskTemplate | null>(null)
   const [templateEditorName, setTemplateEditorName] = useState("")
   const [editingPath, setEditingPath] = useState("")
-  const [runningPath, setRunningPath] = useState("")
+  const [runningPaths, setRunningPaths] = useState<Set<string>>(() => new Set())
+  const [restartingPaths, setRestartingPaths] = useState<Set<string>>(() => new Set())
+  const [deletingTask, setDeletingTask] = useState(false)
   const [deleteTask, setDeleteTask] = useState<ScheduledTaskSummary | null>(null)
   const [deleteTaskOpen, setDeleteTaskOpen] = useState(false)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
@@ -142,6 +147,16 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
       setHistoryStatusLoading(false)
     }
   }, [])
+
+  const refresh = async () => {
+    if (refreshing || loading) return
+    setRefreshing(true)
+    try {
+      await load(tasks.length > 0 || folders.length > 0)
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   useEffect(() => {
     if (!active) return
@@ -215,6 +230,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
   }
 
   const openEdit = async (task: ScheduledTaskSummary) => {
+    if (runningPaths.has(task.path) || editingPath) return
     setEditingPath(task.path)
     try {
       const details = await ScheduledTaskService.Get(task.path)
@@ -276,6 +292,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
   }
 
   const beginSaveTemplate = async (task: ScheduledTaskSummary) => {
+    if (runningPaths.has(task.path) || editingPath) return
     setEditingPath(task.path)
     try {
       const details = await ScheduledTaskService.Get(task.path)
@@ -321,6 +338,8 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
   }
 
   const toggleEnabled = async (task: ScheduledTaskSummary, enabled: boolean) => {
+    if (runningPaths.has(task.path)) return
+    setRunningPaths((current) => new Set(current).add(task.path))
     setTasks((current) => current.map((item) => (
       item.path === task.path ? { ...item, enabled, state: enabled ? "ready" : "disabled" } : item
     )))
@@ -331,52 +350,97 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
         item.path === task.path ? task : item
       )))
       showError(reason)
+    } finally {
+      setRunningPaths((current) => {
+        const next = new Set(current)
+        next.delete(task.path)
+        return next
+      })
     }
   }
 
   const run = async (task: ScheduledTaskSummary) => {
-    setRunningPath(task.path)
+    setRunningPaths((current) => new Set(current).add(task.path))
     try {
       await ScheduledTaskService.Run(task.path)
       await load(tasks.length > 0)
     } catch (reason) {
       showError(reason)
     } finally {
-      setRunningPath("")
+      setRunningPaths((current) => {
+        const next = new Set(current)
+        next.delete(task.path)
+        return next
+      })
     }
   }
 
   const stop = async (task: ScheduledTaskSummary) => {
-    setRunningPath(task.path)
+    setRunningPaths((current) => new Set(current).add(task.path))
     try {
       await ScheduledTaskService.Stop(task.path)
       await load(tasks.length > 0)
     } catch (reason) {
       showError(reason)
     } finally {
-      setRunningPath("")
+      setRunningPaths((current) => {
+        const next = new Set(current)
+        next.delete(task.path)
+        return next
+      })
+    }
+  }
+
+  const restart = async (task: ScheduledTaskSummary) => {
+    if (runningPaths.has(task.path)) return
+    setRunningPaths((current) => new Set(current).add(task.path))
+    setRestartingPaths((current) => new Set(current).add(task.path))
+    try {
+      const updated = await ScheduledTaskService.Restart(task.path)
+      setTasks((current) => current.map((item) => item.path === task.path ? updated : item))
+    } catch (reason) {
+      showError(reason)
+      await load(tasks.length > 0)
+    } finally {
+      setRestartingPaths((current) => {
+        const next = new Set(current)
+        next.delete(task.path)
+        return next
+      })
+      setRunningPaths((current) => {
+        const next = new Set(current)
+        next.delete(task.path)
+        return next
+      })
     }
   }
 
   const exportXML = async (task: ScheduledTaskSummary) => {
-    setRunningPath(task.path)
+    setRunningPaths((current) => new Set(current).add(task.path))
     try {
       await ScheduledTaskService.ExportXML(task.path)
     } catch (reason) {
       showError(reason)
     } finally {
-      setRunningPath("")
+      setRunningPaths((current) => {
+        const next = new Set(current)
+        next.delete(task.path)
+        return next
+      })
     }
   }
 
   const confirmDelete = async () => {
-    if (!deleteTask) return
+    if (!deleteTask || deletingTask) return
+    setDeletingTask(true)
     try {
       await ScheduledTaskService.Delete(deleteTask.path)
+      setTasks((current) => current.filter((task) => task.path !== deleteTask.path))
       setDeleteTaskOpen(false)
-      await load(tasks.length > 0)
     } catch (reason) {
       showError(reason)
+    } finally {
+      setDeletingTask(false)
     }
   }
 
@@ -435,8 +499,8 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
                 />
               )}
             </label>
-            <Button variant="outline" onClick={() => void load(tasks.length > 0)} disabled={loading}>
-              <RefreshCwIcon data-icon="inline-start" />
+            <Button variant="outline" onClick={() => void refresh()} disabled={loading || refreshing}>
+              <RefreshCwIcon data-icon="inline-start" className={cn((loading || refreshing) && "animate-spin")} />
               刷新
             </Button>
             <Button variant="outline" onClick={() => setTemplatesOpen(true)}>
@@ -484,10 +548,12 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
               expandedFolders={searchExpandedFolders ?? expandedFolders}
               onFolderToggle={(path) => setExpandedFolders((current) => toggleSetValue(current, path))}
               editingPath={editingPath}
-              runningPath={runningPath}
+              runningPaths={runningPaths}
+              restartingPaths={restartingPaths}
               onEdit={(task) => void openEdit(task)}
               onRun={(task) => void run(task)}
               onStop={(task) => void stop(task)}
+              onRestart={(task) => void restart(task)}
               onHistory={(task) => void openHistory(task)}
               onExportXML={(task) => void exportXML(task)}
               onEnabledChange={(task, enabled) => void toggleEnabled(task, enabled)}
@@ -674,7 +740,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
 
       <Dialog
         open={deleteTaskOpen}
-        onOpenChange={setDeleteTaskOpen}
+        onOpenChange={(open) => { if (!deletingTask) setDeleteTaskOpen(open) }}
         onOpenChangeComplete={(open) => !open && setDeleteTask(null)}
       >
         <DialogContent>
@@ -683,8 +749,8 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
             <DialogDescription>删除“{deleteTask?.name}”？</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTaskOpen(false)}>取消</Button>
-            <Button onClick={() => void confirmDelete()}>
+            <Button variant="outline" onClick={() => setDeleteTaskOpen(false)} disabled={deletingTask}>取消</Button>
+            <Button onClick={() => void confirmDelete()} disabled={deletingTask}>
               <Trash2Icon data-icon="inline-start" />
               删除
             </Button>
@@ -701,10 +767,12 @@ type TaskTreeProps = {
   expandedFolders: Set<string>
   onFolderToggle: (path: string) => void
   editingPath: string
-  runningPath: string
+  runningPaths: Set<string>
+  restartingPaths: Set<string>
   onEdit: (task: ScheduledTaskSummary) => void
   onRun: (task: ScheduledTaskSummary) => void
   onStop: (task: ScheduledTaskSummary) => void
+  onRestart: (task: ScheduledTaskSummary) => void
   onHistory: (task: ScheduledTaskSummary) => void
   onExportXML: (task: ScheduledTaskSummary) => void
   onEnabledChange: (task: ScheduledTaskSummary, enabled: boolean) => void
@@ -721,10 +789,12 @@ function TaskTree({
   expandedFolders,
   onFolderToggle,
   editingPath,
-  runningPath,
+  runningPaths,
+  restartingPaths,
   onEdit,
   onRun,
   onStop,
+  onRestart,
   onHistory,
   onExportXML,
   onEnabledChange,
@@ -775,10 +845,12 @@ function TaskTree({
                 expandedFolders={expandedFolders}
                 onFolderToggle={onFolderToggle}
                 editingPath={editingPath}
-                runningPath={runningPath}
+                runningPaths={runningPaths}
+                restartingPaths={restartingPaths}
                 onEdit={onEdit}
                 onRun={onRun}
                 onStop={onStop}
+                onRestart={onRestart}
                 onHistory={onHistory}
                 onExportXML={onExportXML}
                 onEnabledChange={onEnabledChange}
@@ -799,10 +871,12 @@ function TaskTree({
           task={task}
           depth={depth}
           editing={editingPath === task.path}
-          running={runningPath === task.path}
+          running={runningPaths.has(task.path)}
+          restarting={restartingPaths.has(task.path)}
           onEdit={() => onEdit(task)}
           onRun={() => onRun(task)}
           onStop={() => onStop(task)}
+          onRestart={() => onRestart(task)}
           onHistory={() => onHistory(task)}
           onExportXML={() => onExportXML(task)}
           onEnabledChange={(enabled) => onEnabledChange(task, enabled)}
@@ -819,9 +893,11 @@ type TaskRowProps = {
   depth: number
   editing: boolean
   running: boolean
+  restarting: boolean
   onEdit: () => void
   onRun: () => void
   onStop: () => void
+  onRestart: () => void
   onHistory: () => void
   onExportXML: () => void
   onEnabledChange: (enabled: boolean) => void
@@ -834,9 +910,11 @@ function TaskRow({
   depth,
   editing,
   running,
+  restarting,
   onEdit,
   onRun,
   onStop,
+  onRestart,
   onHistory,
   onExportXML,
   onEnabledChange,
@@ -848,10 +926,17 @@ function TaskRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger
-        className="grid h-8 min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)] items-center gap-2 border-b pr-2.5 hover:bg-muted/30 md:grid-cols-[minmax(0,1fr)_8.5rem] md:gap-3"
+        className="relative grid h-8 min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)] items-center gap-2 border-b pr-2.5 hover:bg-muted/30 md:grid-cols-[minmax(0,1fr)_8.5rem] md:gap-3"
         style={{ paddingLeft: `${depth * 16 + 32}px` }}
-        onClick={onEdit}
+        onClick={() => { if (!running && !editing) onEdit() }}
+        aria-busy={running || editing}
       >
+        <RotateCwIcon
+          aria-hidden="true"
+          className={cn("pointer-events-none absolute top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground", restarting ? "animate-spin" : "invisible")}
+          style={{ left: `${depth * 16 + 10}px` }}
+        />
+        <span role="status" className="sr-only">{restarting ? "正在重启任务" : ""}</span>
         <span className="flex min-w-0 items-center gap-2">
           <TruncatedText value={task.name} className="max-w-[18rem] shrink-0 text-sm" />
           {status ? (
@@ -875,6 +960,10 @@ function TaskRow({
           <SquareIcon />
           停止
         </ContextMenuItem>
+        <ContextMenuItem onClick={onRestart} disabled={running || !task.enabled}>
+          <RotateCwIcon />
+          重启
+        </ContextMenuItem>
         <ContextMenuItem onClick={() => onEnabledChange(!task.enabled)} disabled={running}>
           <PowerIcon />
           {task.enabled ? "禁用" : "启用"}
@@ -892,7 +981,7 @@ function TaskRow({
           <FileDownIcon />
           导出 XML
         </ContextMenuItem>
-        <ContextMenuItem onClick={onSaveTemplate} disabled={running}>
+        <ContextMenuItem onClick={onSaveTemplate} disabled={editing || running}>
           <CopyPlusIcon />
           保存为模板
         </ContextMenuItem>
@@ -986,4 +1075,3 @@ function historyLevelLabel(level: number): string {
       return ""
   }
 }
-

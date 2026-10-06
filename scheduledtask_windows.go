@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -663,6 +664,88 @@ func (s *ScheduledTaskService) Stop(taskPath string) error {
 		return struct{}{}, nil
 	})
 	return err
+}
+
+// Restart 停止任务并确认没有运行或排队实例后，再启动任务。
+func (s *ScheduledTaskService) Restart(taskPath string) (ScheduledTaskSummary, error) {
+	return withTaskService(func(service *ole.IDispatch) (ScheduledTaskSummary, error) {
+		task, release, err := getRegisteredTask(service, taskPath)
+		if err != nil {
+			return ScheduledTaskSummary{}, err
+		}
+		defer release()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err = restartScheduledTask(ctx, func() error {
+			result, err := oleutil.CallMethod(task, "Stop", 0)
+			clearVariant(result)
+			return schedulerError("停止计划任务失败", err)
+		}, func() (int, error) {
+			result, err := oleutil.GetProperty(task, "State")
+			if err != nil {
+				return 0, schedulerError("读取计划任务状态失败", err)
+			}
+			if result == nil {
+				return 0, errors.New("计划任务状态不可用")
+			}
+			defer result.Clear()
+			state, ok := result.Value().(int32)
+			if !ok {
+				return 0, errors.New("无法识别计划任务状态")
+			}
+			return int(state), nil
+		}, func() error {
+			result, err := oleutil.CallMethod(task, "Run", nil)
+			if err != nil {
+				return schedulerError("启动计划任务失败", err)
+			}
+			if running := result.ToIDispatch(); running != nil {
+				running.Release()
+			}
+			return nil
+		})
+		if err != nil {
+			return ScheduledTaskSummary{}, err
+		}
+		return readScheduledTaskSummary(task), nil
+	})
+}
+
+func restartScheduledTask(ctx context.Context, stop func() error, state func() (int, error), run func() error) error {
+	if err := stop(); err != nil {
+		return err
+	}
+	// Task Scheduler 的状态接口没有变更订阅；仅在重启期间有界查询实际状态。
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("等待计划任务停止失败: %w", err)
+		}
+		current, err := state()
+		if err != nil {
+			return err
+		}
+		switch current {
+		case 3:
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("等待计划任务停止失败: %w", err)
+			}
+			return run()
+		case 1:
+			return errors.New("计划任务已禁用，无法重启")
+		case 2, 4:
+			// 排队和运行状态都不能视为停止完成。
+		default:
+			return errors.New("计划任务状态未知，无法确认停止")
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("等待计划任务停止失败: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (s *ScheduledTaskService) ExportXML(taskPath string) error {
