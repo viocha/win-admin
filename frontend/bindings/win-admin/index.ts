@@ -33,6 +33,7 @@ export type {
     ScheduledTaskEdit,
     ScheduledTaskHistoryEvent,
     ScheduledTaskSettings,
+    ScheduledTaskStateChange,
     ScheduledTaskSummary,
     ScheduledTaskTemplate,
     ScheduledTaskTrigger

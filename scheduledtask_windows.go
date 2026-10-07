@@ -613,139 +613,283 @@ func (s *ScheduledTaskService) Save(request SaveScheduledTaskRequest) (Scheduled
 	})
 }
 
-func (s *ScheduledTaskService) SetEnabled(taskPath string, enabled bool) error {
-	_, err := withTaskService(func(service *ole.IDispatch) (struct{}, error) {
+func (s *ScheduledTaskService) SetEnabled(taskPath string, enabled bool) (ScheduledTaskSummary, error) {
+	return withTaskService(func(service *ole.IDispatch) (ScheduledTaskSummary, error) {
 		task, release, getErr := getRegisteredTask(service, taskPath)
 		if getErr != nil {
-			return struct{}{}, getErr
+			return ScheduledTaskSummary{}, getErr
 		}
 		defer release()
 		result, putErr := oleutil.PutProperty(task, "Enabled", enabled)
 		clearVariant(result)
 		if putErr != nil {
-			return struct{}{}, schedulerError("修改任务状态失败", putErr)
+			return ScheduledTaskSummary{}, schedulerError("修改任务状态失败", putErr)
 		}
-		return struct{}{}, nil
+		return freshScheduledTaskSummary(service, taskPath)
 	})
-	return err
 }
 
-func (s *ScheduledTaskService) Run(taskPath string) error {
-	_, err := withTaskService(func(service *ole.IDispatch) (struct{}, error) {
-		task, release, getErr := getRegisteredTask(service, taskPath)
-		if getErr != nil {
-			return struct{}{}, getErr
+// Summaries 批量读取指定任务的实时状态，最多查询 128 个任务。
+func (s *ScheduledTaskService) Summaries(taskPaths []string) ([]ScheduledTaskSummary, error) {
+	if len(taskPaths) > 128 {
+		return nil, errors.New("一次最多查询 128 个计划任务")
+	}
+	return withTaskService(func(service *ole.IDispatch) ([]ScheduledTaskSummary, error) {
+		items := make([]ScheduledTaskSummary, 0, len(taskPaths))
+		for _, path := range taskPaths {
+			summary, err := freshScheduledTaskSummary(service, path)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, summary)
 		}
-		defer release()
-		result, runErr := oleutil.CallMethod(task, "Run", nil)
-		if runErr != nil {
-			return struct{}{}, schedulerError("启动计划任务失败", runErr)
-		}
-		if running := result.ToIDispatch(); running != nil {
-			running.Release()
-		}
-		return struct{}{}, nil
+		return items, nil
 	})
-	return err
 }
 
-func (s *ScheduledTaskService) Stop(taskPath string) error {
-	_, err := withTaskService(func(service *ole.IDispatch) (struct{}, error) {
-		task, release, getErr := getRegisteredTask(service, taskPath)
-		if getErr != nil {
-			return struct{}{}, getErr
-		}
-		defer release()
-		result, stopErr := oleutil.CallMethod(task, "Stop", 0)
-		clearVariant(result)
-		if stopErr != nil {
-			return struct{}{}, schedulerError("停止计划任务失败", stopErr)
-		}
-		return struct{}{}, nil
-	})
-	return err
+func (s *ScheduledTaskService) Run(taskPath, operationID string) (ScheduledTaskSummary, error) {
+	return controlScheduledTask(taskPath, "run", func(summary ScheduledTaskSummary) { publishScheduledTaskState(operationID, summary) })
 }
 
-// Restart 停止任务并确认没有运行或排队实例后，再启动任务。
-func (s *ScheduledTaskService) Restart(taskPath string) (ScheduledTaskSummary, error) {
+func (s *ScheduledTaskService) Stop(taskPath, operationID string) (ScheduledTaskSummary, error) {
+	return controlScheduledTask(taskPath, "stop", func(summary ScheduledTaskSummary) { publishScheduledTaskState(operationID, summary) })
+}
+
+// Restart 确认所有实例停止后启动新实例，并等待启动结果。
+func (s *ScheduledTaskService) Restart(taskPath, operationID string) (ScheduledTaskSummary, error) {
+	return controlScheduledTask(taskPath, "restart", func(summary ScheduledTaskSummary) { publishScheduledTaskState(operationID, summary) })
+}
+
+func controlScheduledTask(taskPath, operation string, onStateChange func(ScheduledTaskSummary)) (ScheduledTaskSummary, error) {
 	return withTaskService(func(service *ole.IDispatch) (ScheduledTaskSummary, error) {
+		var lastPublished ScheduledTaskSummary
+		publish := func(summary ScheduledTaskSummary) {
+			if summary != lastPublished {
+				lastPublished = summary
+				if onStateChange != nil {
+					onStateChange(summary)
+				}
+			}
+		}
 		task, release, err := getRegisteredTask(service, taskPath)
 		if err != nil {
 			return ScheduledTaskSummary{}, err
 		}
 		defer release()
-
+		if operation != "stop" {
+			if !getDispatchBool(task, "Enabled") {
+				return ScheduledTaskSummary{}, errors.New("计划任务已禁用，无法启动")
+			}
+			definition, err := oleutil.GetProperty(task, "Definition")
+			if err != nil {
+				return ScheduledTaskSummary{}, schedulerError("读取任务定义失败", err)
+			}
+			defer clearVariant(definition)
+			if definition == nil || definition.ToIDispatch() == nil {
+				return ScheduledTaskSummary{}, errors.New("任务定义不可用")
+			}
+			settings, err := oleutil.GetProperty(definition.ToIDispatch(), "Settings")
+			if err != nil {
+				return ScheduledTaskSummary{}, schedulerError("读取任务设置失败", err)
+			}
+			defer clearVariant(settings)
+			if settings == nil || settings.ToIDispatch() == nil {
+				return ScheduledTaskSummary{}, errors.New("任务设置不可用")
+			}
+			if !getDispatchBool(settings.ToIDispatch(), "AllowDemandStart") {
+				return ScheduledTaskSummary{}, errors.New("计划任务不允许按需启动")
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		err = restartScheduledTask(ctx, func() error {
+		if operation != "run" {
+			// 在停止前保留进程句柄，等包装器及其后代释放资源后再启动。
+			processes, err := captureScheduledTaskProcesses(task)
+			if err != nil {
+				return ScheduledTaskSummary{}, err
+			}
+			defer processes.close()
 			result, err := oleutil.CallMethod(task, "Stop", 0)
 			clearVariant(result)
-			return schedulerError("停止计划任务失败", err)
-		}, func() (int, error) {
-			result, err := oleutil.GetProperty(task, "State")
 			if err != nil {
-				return 0, schedulerError("读取计划任务状态失败", err)
+				return ScheduledTaskSummary{}, schedulerError("停止计划任务失败", err)
 			}
-			if result == nil {
-				return 0, errors.New("计划任务状态不可用")
-			}
-			defer result.Clear()
-			state, ok := result.Value().(int32)
-			if !ok {
-				return 0, errors.New("无法识别计划任务状态")
-			}
-			return int(state), nil
-		}, func() error {
-			result, err := oleutil.CallMethod(task, "Run", nil)
+			err = waitScheduledTask(ctx, "等待计划任务停止失败", func() (bool, error) {
+				// 重新获取注册对象，并核对实例数，避免用停止前的快照判断完成。
+				current, release, err := getRegisteredTask(service, taskPath)
+				if err != nil {
+					return false, err
+				}
+				defer release()
+				state, err := scheduledTaskIntProperty(current, "State")
+				if err != nil {
+					return false, err
+				}
+				instances, err := oleutil.CallMethod(current, "GetInstances", 0)
+				if err != nil {
+					return false, schedulerError("读取任务实例失败", err)
+				}
+				defer clearVariant(instances)
+				if instances == nil || instances.ToIDispatch() == nil {
+					return false, errors.New("任务实例不可用")
+				}
+				count, err := scheduledTaskIntProperty(instances.ToIDispatch(), "Count")
+				if err != nil {
+					return false, err
+				}
+				summary := readScheduledTaskSummary(current)
+				summary.State = scheduledTaskStateName(state)
+				publish(summary)
+				return count == 0 && (state == 1 || state == 3), err
+			})
 			if err != nil {
-				return schedulerError("启动计划任务失败", err)
+				return ScheduledTaskSummary{}, err
 			}
-			if running := result.ToIDispatch(); running != nil {
-				running.Release()
+			if err := processes.wait(ctx); err != nil {
+				return ScheduledTaskSummary{}, err
 			}
-			return nil
-		})
+			if operation == "stop" {
+				return freshScheduledTaskSummary(service, taskPath)
+			}
+		}
+		// 启动使用新的注册对象；保留 Run 返回的实例以确认本次启动。
+		current, releaseCurrent, err := getRegisteredTask(service, taskPath)
 		if err != nil {
 			return ScheduledTaskSummary{}, err
 		}
-		return readScheduledTaskSummary(task), nil
+		defer releaseCurrent()
+		result, err := oleutil.CallMethod(current, "Run", nil)
+		if err != nil {
+			clearVariant(result)
+			return ScheduledTaskSummary{}, schedulerError("启动计划任务失败", err)
+		}
+		defer clearVariant(result)
+		if result == nil || result.ToIDispatch() == nil {
+			return ScheduledTaskSummary{}, errors.New("计划任务未创建运行实例")
+		}
+		instance := result.ToIDispatch()
+		var summary ScheduledTaskSummary
+		err = waitScheduledTask(ctx, "等待计划任务启动失败", func() (bool, error) {
+			state, stateErr := scheduledTaskIntProperty(instance, "State")
+			// 实例已结束时，部分系统返回 SCHED_E_TASK_NOT_RUNNING。
+			var oleErr *ole.OleError
+			if stateErr != nil && !(errors.As(stateErr, &oleErr) && uint32(oleErr.Code()) == 0x8004130B) {
+				return false, stateErr
+			}
+			var err error
+			summary, err = freshScheduledTaskSummary(service, taskPath)
+			if err != nil {
+				return false, err
+			}
+			done, err := scheduledTaskStartConfirmed(state, summary)
+			if done && state == 4 {
+				pid, pidErr := scheduledTaskIntProperty(instance, "EnginePID")
+				if pidErr != nil {
+					return false, pidErr
+				}
+				if pid == 0 {
+					return false, nil
+				}
+				alive, pidErr := scheduledTaskProcessAlive(uint32(pid))
+				if pidErr != nil {
+					return false, pidErr
+				}
+				if !alive {
+					return false, nil
+				}
+			}
+			if summary.State != "running" || done {
+				publish(summary)
+			}
+			return done, err
+		})
+		return summary, err
 	})
 }
 
-func restartScheduledTask(ctx context.Context, stop func() error, state func() (int, error), run func() error) error {
-	if err := stop(); err != nil {
-		return err
+func scheduledTaskStartConfirmed(instanceState int, summary ScheduledTaskSummary) (bool, error) {
+	if instanceState == 2 || summary.State == "queued" {
+		return false, nil
 	}
-	// Task Scheduler 的状态接口没有变更订阅；仅在重启期间有界查询实际状态。
+	if instanceState == 4 && summary.State == "running" {
+		return true, nil
+	}
+	if instanceState == 4 {
+		return false, nil
+	}
+	if summary.State == "ready" || summary.State == "disabled" {
+		switch uint32(summary.LastResult) {
+		case 0:
+			// 短任务可能在首次查询前完成，按真实状态显示就绪。
+			return true, nil
+		case 0x41300, 0x41301, 0x41303, 0x41306:
+			// 尚未更新本次执行结果，等待调度器完成状态同步。
+			return false, nil
+		default:
+			return false, fmt.Errorf("计划任务执行失败 (0x%08X)", uint32(summary.LastResult))
+		}
+	}
+	return false, nil
+}
+
+func waitScheduledTask(ctx context.Context, message string, check func() (bool, error)) error {
+	// 状态接口没有变更订阅；仅在操作期间有界查询，不用延时猜测完成。
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("等待计划任务停止失败: %w", err)
+			return fmt.Errorf("%s: %w", message, err)
 		}
-		current, err := state()
+		done, err := check()
 		if err != nil {
 			return err
 		}
-		switch current {
-		case 3:
-			if err := ctx.Err(); err != nil {
-				return fmt.Errorf("等待计划任务停止失败: %w", err)
-			}
-			return run()
-		case 1:
-			return errors.New("计划任务已禁用，无法重启")
-		case 2, 4:
-			// 排队和运行状态都不能视为停止完成。
-		default:
-			return errors.New("计划任务状态未知，无法确认停止")
+		if done {
+			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("等待计划任务停止失败: %w", ctx.Err())
+			return fmt.Errorf("%s: %w", message, ctx.Err())
 		case <-ticker.C:
 		}
 	}
+}
+
+func scheduledTaskIntProperty(task *ole.IDispatch, property string) (int, error) {
+	result, err := oleutil.GetProperty(task, property)
+	if err != nil {
+		return 0, schedulerError("读取任务 "+property+" 失败", err)
+	}
+	defer clearVariant(result)
+	if result != nil {
+		switch value := result.Value().(type) {
+		case int32:
+			return int(value), nil
+		case uint32:
+			return int(value), nil
+		}
+	}
+	return 0, errors.New("任务 " + property + " 不可用")
+}
+
+func freshScheduledTaskSummary(service *ole.IDispatch, path string) (ScheduledTaskSummary, error) {
+	task, release, err := getRegisteredTask(service, path)
+	if err != nil {
+		return ScheduledTaskSummary{}, err
+	}
+	defer release()
+	state, err := scheduledTaskIntProperty(task, "State")
+	if err != nil {
+		return ScheduledTaskSummary{}, err
+	}
+	summary := readScheduledTaskSummary(task)
+	summary.State = scheduledTaskStateName(state)
+	result, err := scheduledTaskIntProperty(task, "LastTaskResult")
+	if err != nil {
+		return ScheduledTaskSummary{}, err
+	}
+	summary.LastResult = int32(result)
+	return summary, nil
 }
 
 func (s *ScheduledTaskService) ExportXML(taskPath string) error {
@@ -2107,7 +2251,7 @@ func schedulerError(action string, err error) error {
 	}
 	var oleErr *ole.OleError
 	if errors.As(err, &oleErr) {
-		return fmt.Errorf("%s: %s (0x%08X)", action, oleErr.Error(), uint32(oleErr.Code()))
+		return fmt.Errorf("%s: %w (0x%08X)", action, oleErr, uint32(oleErr.Code()))
 	}
 	return fmt.Errorf("%s: %w", action, err)
 }

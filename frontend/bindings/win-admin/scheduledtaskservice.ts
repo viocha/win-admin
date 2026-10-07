@@ -59,21 +59,21 @@ export function PickExecutable(): $CancellablePromise<string> {
 }
 
 /**
- * Restart 停止任务并确认没有运行或排队实例后，再启动任务。
+ * Restart 确认所有实例停止后启动新实例，并等待启动结果。
  */
-export function Restart(taskPath: string): $CancellablePromise<$models.ScheduledTaskSummary> {
-    return $Call.ByID(3203587142, taskPath);
+export function Restart(taskPath: string, operationID: string): $CancellablePromise<$models.ScheduledTaskSummary> {
+    return $Call.ByID(3203587142, taskPath, operationID);
 }
 
-export function Run(taskPath: string): $CancellablePromise<void> {
-    return $Call.ByID(1946333768, taskPath);
+export function Run(taskPath: string, operationID: string): $CancellablePromise<$models.ScheduledTaskSummary> {
+    return $Call.ByID(1946333768, taskPath, operationID);
 }
 
 export function Save(request: $models.SaveScheduledTaskRequest): $CancellablePromise<$models.ScheduledTaskDetails> {
     return $Call.ByID(1257766586, request);
 }
 
-export function SetEnabled(taskPath: string, enabled: boolean): $CancellablePromise<void> {
+export function SetEnabled(taskPath: string, enabled: boolean): $CancellablePromise<$models.ScheduledTaskSummary> {
     return $Call.ByID(2087369198, taskPath, enabled);
 }
 
@@ -81,6 +81,13 @@ export function SetHistoryEnabled(enabled: boolean): $CancellablePromise<void> {
     return $Call.ByID(4091202164, enabled);
 }
 
-export function Stop(taskPath: string): $CancellablePromise<void> {
-    return $Call.ByID(1293441335, taskPath);
+export function Stop(taskPath: string, operationID: string): $CancellablePromise<$models.ScheduledTaskSummary> {
+    return $Call.ByID(1293441335, taskPath, operationID);
+}
+
+/**
+ * Summaries 批量读取指定任务的实时状态，最多查询 128 个任务。
+ */
+export function Summaries(taskPaths: string[] | null): $CancellablePromise<$models.ScheduledTaskSummary[] | null> {
+    return $Call.ByID(2365070373, taskPaths);
 }

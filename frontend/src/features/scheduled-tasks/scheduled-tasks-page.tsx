@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "cn"
+import { Events } from "@wailsio/runtime"
 import {
   ChevronRightIcon,
   CopyPlusIcon,
@@ -95,7 +96,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
   const [templateEditorName, setTemplateEditorName] = useState("")
   const [editingPath, setEditingPath] = useState("")
   const [runningPaths, setRunningPaths] = useState<Set<string>>(() => new Set())
-  const [restartingPaths, setRestartingPaths] = useState<Set<string>>(() => new Set())
+  const [progressingPaths, setProgressingPaths] = useState<Set<string>>(() => new Set())
   const [deletingTask, setDeletingTask] = useState(false)
   const [deleteTask, setDeleteTask] = useState<ScheduledTaskSummary | null>(null)
   const [deleteTaskOpen, setDeleteTaskOpen] = useState(false)
@@ -119,21 +120,49 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const hasLoadedRef = useRef(false)
+  const pendingPathsRef = useRef(new Set<string>())
+  const pendingOperationsRef = useRef(new Map<string, string>())
+  const taskVersionsRef = useRef(new Map<string, number>())
+  const loadVersionRef = useRef(0)
+
+  useEffect(() => Events.On("scheduled-task:state-changed", (event) => {
+    const { operationId, summary } = event.data
+    if (pendingOperationsRef.current.get(summary.path) !== operationId) return
+    taskVersionsRef.current.set(summary.path, (taskVersionsRef.current.get(summary.path) ?? 0) + 1)
+    setTasks((current) => current.map((task) => task.path === summary.path ? summary : task))
+  }), [])
+
+  const updateTasks = useCallback((updates: ScheduledTaskSummary[], versions: Map<string, number>) => {
+    const byPath = new Map(updates.map((task) => [task.path, task]))
+    setTasks((current) => current.map((task) => (
+      versions.get(task.path) === taskVersionsRef.current.get(task.path)
+        ? byPath.get(task.path) ?? task : task
+    )))
+  }, [])
 
   const load = useCallback(async (silent = false) => {
+    const loadVersion = ++loadVersionRef.current
+    const versions = new Map(taskVersionsRef.current)
     if (!silent) setLoading(true)
     try {
       const [nextTasks, nextFolders] = await Promise.all([
         ScheduledTaskService.List(),
         ScheduledTaskService.ListFolders(),
       ])
-      setTasks(nextTasks ?? [])
+      if (loadVersion !== loadVersionRef.current) return
+      setTasks((current) => {
+        const byPath = new Map(current.map((task) => [task.path, task]))
+        return (nextTasks ?? []).map((task) => (
+          versions.get(task.path) === taskVersionsRef.current.get(task.path)
+            ? task : byPath.get(task.path) ?? task
+        ))
+      })
       setFolders(nextFolders ?? [])
       hasLoadedRef.current = true
     } catch (reason) {
       showError(reason)
     } finally {
-      if (!silent) setLoading(false)
+      if (loadVersion === loadVersionRef.current) setLoading(false)
     }
   }, [])
 
@@ -163,6 +192,44 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
     void load(hasLoadedRef.current)
     void loadHistoryStatus()
   }, [active, load, loadHistoryStatus])
+
+  const watchedPaths = tasks
+    .filter((task) => (task.state === "running" || task.state === "queued") && !runningPaths.has(task.path))
+    .map((task) => task.path).sort()
+  const watchedPathsKey = JSON.stringify(watchedPaths)
+
+  useEffect(() => {
+    const paths: string[] = JSON.parse(watchedPathsKey)
+    if (!active || paths.length === 0) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    const poll = async () => {
+      const versions = new Map(taskVersionsRef.current)
+      try {
+        const updates: ScheduledTaskSummary[] = []
+        // 状态接口没有订阅机制；仅在页面可见且存在活动任务时低频批量查询。
+        for (let offset = 0; offset < paths.length; offset += 128) {
+          updates.push(...await ScheduledTaskService.Summaries(paths.slice(offset, offset + 128)) ?? [])
+          if (cancelled) return
+        }
+        for (const task of updates) {
+          if (versions.get(task.path) !== taskVersionsRef.current.get(task.path)) continue
+          if (task.state === "ready" && task.lastResult !== 0 && task.lastResult !== 0x41306) {
+            showErrorMessage(`${task.name}：执行失败 (0x${(task.lastResult >>> 0).toString(16).toUpperCase().padStart(8, "0")})`)
+          }
+        }
+        updateTasks(updates, versions)
+        if (!cancelled) timer = setTimeout(() => void poll(), 2000)
+      } catch (reason) {
+        if (!cancelled) showError(reason, "无法更新任务状态")
+      }
+    }
+    timer = setTimeout(() => void poll(), 2000)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [active, watchedPathsKey, updateTasks])
 
   const taskTree = useMemo(() => {
     const keyword = query.trim().toLowerCase()
@@ -337,72 +404,38 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
     setTemplateEditorName("")
   }
 
-  const toggleEnabled = async (task: ScheduledTaskSummary, enabled: boolean) => {
-    if (runningPaths.has(task.path)) return
+  const controlTask = async (
+    task: ScheduledTaskSummary,
+    action: (operationId: string) => Promise<ScheduledTaskSummary>,
+    showProgress: boolean,
+  ) => {
+    if (pendingPathsRef.current.has(task.path)) return
+    pendingPathsRef.current.add(task.path)
+    const operationId = crypto.randomUUID()
+    pendingOperationsRef.current.set(task.path, operationId)
+    const bumpVersion = () => taskVersionsRef.current.set(task.path, (taskVersionsRef.current.get(task.path) ?? 0) + 1)
+    bumpVersion()
     setRunningPaths((current) => new Set(current).add(task.path))
-    setTasks((current) => current.map((item) => (
-      item.path === task.path ? { ...item, enabled, state: enabled ? "ready" : "disabled" } : item
-    )))
+    if (showProgress) setProgressingPaths((current) => new Set(current).add(task.path))
     try {
-      await ScheduledTaskService.SetEnabled(task.path, enabled)
-    } catch (reason) {
-      setTasks((current) => current.map((item) => (
-        item.path === task.path ? task : item
-      )))
-      showError(reason)
-    } finally {
-      setRunningPaths((current) => {
-        const next = new Set(current)
-        next.delete(task.path)
-        return next
-      })
-    }
-  }
-
-  const run = async (task: ScheduledTaskSummary) => {
-    setRunningPaths((current) => new Set(current).add(task.path))
-    try {
-      await ScheduledTaskService.Run(task.path)
-      await load(tasks.length > 0)
-    } catch (reason) {
-      showError(reason)
-    } finally {
-      setRunningPaths((current) => {
-        const next = new Set(current)
-        next.delete(task.path)
-        return next
-      })
-    }
-  }
-
-  const stop = async (task: ScheduledTaskSummary) => {
-    setRunningPaths((current) => new Set(current).add(task.path))
-    try {
-      await ScheduledTaskService.Stop(task.path)
-      await load(tasks.length > 0)
-    } catch (reason) {
-      showError(reason)
-    } finally {
-      setRunningPaths((current) => {
-        const next = new Set(current)
-        next.delete(task.path)
-        return next
-      })
-    }
-  }
-
-  const restart = async (task: ScheduledTaskSummary) => {
-    if (runningPaths.has(task.path)) return
-    setRunningPaths((current) => new Set(current).add(task.path))
-    setRestartingPaths((current) => new Set(current).add(task.path))
-    try {
-      const updated = await ScheduledTaskService.Restart(task.path)
+      const updated = await action(operationId)
+      bumpVersion()
       setTasks((current) => current.map((item) => item.path === task.path ? updated : item))
     } catch (reason) {
       showError(reason)
-      await load(tasks.length > 0)
+      // 部分操作可能已经生效，失败后也读取实际状态。
+      try {
+        const updates = await ScheduledTaskService.Summaries([task.path])
+        bumpVersion()
+        const updated = updates?.[0]
+        if (updated) setTasks((current) => current.map((item) => item.path === task.path ? updated : item))
+      } catch (reason) {
+        showError(reason, "无法读取操作后的任务状态")
+      }
     } finally {
-      setRestartingPaths((current) => {
+      pendingPathsRef.current.delete(task.path)
+      pendingOperationsRef.current.delete(task.path)
+      setProgressingPaths((current) => {
         const next = new Set(current)
         next.delete(task.path)
         return next
@@ -414,6 +447,18 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
       })
     }
   }
+
+  const toggleEnabled = (task: ScheduledTaskSummary, enabled: boolean) =>
+    controlTask(task, () => ScheduledTaskService.SetEnabled(task.path, enabled), false)
+
+  const run = (task: ScheduledTaskSummary) =>
+    controlTask(task, (operationId) => ScheduledTaskService.Run(task.path, operationId), true)
+
+  const stop = (task: ScheduledTaskSummary) =>
+    controlTask(task, (operationId) => ScheduledTaskService.Stop(task.path, operationId), true)
+
+  const restart = (task: ScheduledTaskSummary) =>
+    controlTask(task, (operationId) => ScheduledTaskService.Restart(task.path, operationId), true)
 
   const exportXML = async (task: ScheduledTaskSummary) => {
     setRunningPaths((current) => new Set(current).add(task.path))
@@ -549,7 +594,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
               onFolderToggle={(path) => setExpandedFolders((current) => toggleSetValue(current, path))}
               editingPath={editingPath}
               runningPaths={runningPaths}
-              restartingPaths={restartingPaths}
+              progressingPaths={progressingPaths}
               onEdit={(task) => void openEdit(task)}
               onRun={(task) => void run(task)}
               onStop={(task) => void stop(task)}
@@ -768,7 +813,7 @@ type TaskTreeProps = {
   onFolderToggle: (path: string) => void
   editingPath: string
   runningPaths: Set<string>
-  restartingPaths: Set<string>
+  progressingPaths: Set<string>
   onEdit: (task: ScheduledTaskSummary) => void
   onRun: (task: ScheduledTaskSummary) => void
   onStop: (task: ScheduledTaskSummary) => void
@@ -790,7 +835,7 @@ function TaskTree({
   onFolderToggle,
   editingPath,
   runningPaths,
-  restartingPaths,
+  progressingPaths,
   onEdit,
   onRun,
   onStop,
@@ -846,7 +891,7 @@ function TaskTree({
                 onFolderToggle={onFolderToggle}
                 editingPath={editingPath}
                 runningPaths={runningPaths}
-                restartingPaths={restartingPaths}
+                progressingPaths={progressingPaths}
                 onEdit={onEdit}
                 onRun={onRun}
                 onStop={onStop}
@@ -872,7 +917,7 @@ function TaskTree({
           depth={depth}
           editing={editingPath === task.path}
           running={runningPaths.has(task.path)}
-          restarting={restartingPaths.has(task.path)}
+          progressing={progressingPaths.has(task.path)}
           onEdit={() => onEdit(task)}
           onRun={() => onRun(task)}
           onStop={() => onStop(task)}
@@ -893,7 +938,7 @@ type TaskRowProps = {
   depth: number
   editing: boolean
   running: boolean
-  restarting: boolean
+  progressing: boolean
   onEdit: () => void
   onRun: () => void
   onStop: () => void
@@ -910,7 +955,7 @@ function TaskRow({
   depth,
   editing,
   running,
-  restarting,
+  progressing,
   onEdit,
   onRun,
   onStop,
@@ -921,10 +966,18 @@ function TaskRow({
   onSaveTemplate,
   onDelete,
 }: TaskRowProps) {
+  const pendingActionRef = useRef<(() => void) | null>(null)
+  const afterMenuClose = (action: () => void) => { pendingActionRef.current = action }
+  const taskActive = task.state === "running" || task.state === "queued"
   const status = stateLabel(task.state)
   const actionSummary = [task.command, task.arguments].filter(Boolean).join(" ")
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChangeComplete={(open) => {
+      if (open) return
+      const action = pendingActionRef.current
+      pendingActionRef.current = null
+      action?.()
+    }}>
       <ContextMenuTrigger
         className="relative grid h-8 min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)] items-center gap-2 border-b pr-2.5 hover:bg-muted/30 md:grid-cols-[minmax(0,1fr)_8.5rem] md:gap-3"
         style={{ paddingLeft: `${depth * 16 + 32}px` }}
@@ -933,10 +986,10 @@ function TaskRow({
       >
         <RotateCwIcon
           aria-hidden="true"
-          className={cn("pointer-events-none absolute top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground", restarting ? "animate-spin" : "invisible")}
+          className={cn("pointer-events-none absolute top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground", progressing ? "animate-spin" : "invisible")}
           style={{ left: `${depth * 16 + 10}px` }}
         />
-        <span role="status" className="sr-only">{restarting ? "正在重启任务" : ""}</span>
+        <span role="status" className="sr-only">{progressing ? "正在执行任务操作" : ""}</span>
         <span className="flex min-w-0 items-center gap-2">
           <TruncatedText value={task.name} className="max-w-[18rem] shrink-0 text-sm" />
           {status ? (
@@ -952,41 +1005,47 @@ function TaskRow({
       </ContextMenuTrigger>
 
       <ContextMenuContent className="w-40">
-        <ContextMenuItem onClick={onRun} disabled={running || !task.enabled}>
-          <PlayIcon />
-          运行
-        </ContextMenuItem>
-        <ContextMenuItem onClick={onStop} disabled={running || task.state !== "running"}>
-          <SquareIcon />
-          停止
-        </ContextMenuItem>
-        <ContextMenuItem onClick={onRestart} disabled={running || !task.enabled}>
-          <RotateCwIcon />
-          重启
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => onEnabledChange(!task.enabled)} disabled={running}>
+        {!taskActive ? (
+          <ContextMenuItem onClick={() => afterMenuClose(onRun)} disabled={running || !task.enabled}>
+            <PlayIcon />
+            运行
+          </ContextMenuItem>
+        ) : null}
+        {taskActive ? (
+          <ContextMenuItem onClick={() => afterMenuClose(onStop)} disabled={running}>
+            <SquareIcon />
+            停止
+          </ContextMenuItem>
+        ) : null}
+        {task.state === "running" ? (
+          <ContextMenuItem onClick={() => afterMenuClose(onRestart)} disabled={running || !task.enabled}>
+            <RotateCwIcon />
+            重启
+          </ContextMenuItem>
+        ) : null}
+        <ContextMenuItem onClick={() => afterMenuClose(() => onEnabledChange(!task.enabled))} disabled={running}>
           <PowerIcon />
           {task.enabled ? "禁用" : "启用"}
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={onEdit} disabled={editing || running}>
+        <ContextMenuItem onClick={() => afterMenuClose(onEdit)} disabled={editing || running}>
           <PencilIcon />
           编辑
         </ContextMenuItem>
-        <ContextMenuItem onClick={onHistory}>
+        <ContextMenuItem onClick={() => afterMenuClose(onHistory)}>
           <HistoryIcon />
           历史记录
         </ContextMenuItem>
-        <ContextMenuItem onClick={onExportXML} disabled={running}>
+        <ContextMenuItem onClick={() => afterMenuClose(onExportXML)} disabled={running}>
           <FileDownIcon />
           导出 XML
         </ContextMenuItem>
-        <ContextMenuItem onClick={onSaveTemplate} disabled={editing || running}>
+        <ContextMenuItem onClick={() => afterMenuClose(onSaveTemplate)} disabled={editing || running}>
           <CopyPlusIcon />
           保存为模板
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={onDelete} disabled={running}>
+        <ContextMenuItem onClick={() => afterMenuClose(onDelete)} disabled={running}>
           <Trash2Icon />
           删除
         </ContextMenuItem>

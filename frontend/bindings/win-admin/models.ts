@@ -159,6 +159,11 @@ export interface ScheduledTaskSettings {
     "restartCount": number;
 }
 
+export interface ScheduledTaskStateChange {
+    "operationId": string;
+    "summary": ScheduledTaskSummary;
+}
+
 export interface ScheduledTaskSummary {
     "name": string;
     "path": string;
