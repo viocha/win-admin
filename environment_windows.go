@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unsafe"
@@ -243,7 +244,23 @@ func analyzePathEntries(scope string, entries []string) ([]EnvironmentPathEntry,
 			Exists:   checkPath != "" && statErr == nil,
 		})
 	}
+	markDuplicatePathEntries(result)
 	return result, nil
+}
+
+// markDuplicatePathEntries 保留每个路径的第一项，标记后续相同项。
+func markDuplicatePathEntries(entries []EnvironmentPathEntry) {
+	seen := make(map[string]bool, len(entries))
+	for index := range entries {
+		path := strings.Trim(strings.TrimSpace(entries[index].Expanded), `"`)
+		if path == "" {
+			entries[index].Duplicate = false
+			continue
+		}
+		key := strings.ToLower(filepath.Clean(path))
+		entries[index].Duplicate = seen[key]
+		seen[key] = true
+	}
 }
 
 func currentRegistryEnvironment() (map[string]string, error) {

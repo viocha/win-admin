@@ -5,6 +5,7 @@ import {
   ArrowUpToLineIcon,
   LoaderCircleIcon,
   PlusIcon,
+  SearchIcon,
   TriangleAlertIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -24,6 +25,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { showError } from "@/lib/error-toast"
@@ -47,11 +50,17 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [query, setQuery] = useState("")
   const nextEntryId = useRef(0)
   const pendingFocusId = useRef<number | null>(null)
   const pendingScrollToTop = useRef(false)
   const inputRefs = useRef(new Map<number, HTMLInputElement>())
-  const missingEntries = entries.filter(isMissingEntry)
+  const keyword = query.trim().toLowerCase()
+  const visibleEntries = entries.map((entry, index) => ({ entry, index })).filter(({ entry }) => (
+    !keyword || `${entry.value}\n${entry.validated ? entry.expanded : ""}`.toLowerCase().includes(keyword)
+  ))
+  const missingEntries = visibleEntries.map(({ entry }) => entry).filter(isMissingEntry)
+  const duplicateEntries = visibleEntries.map(({ entry }) => entry).filter((entry) => entry.validated && entry.duplicate)
   const selectedIndex = selectedId === null ? -1 : entries.findIndex((entry) => entry.id === selectedId)
 
   const canMoveSelected = (offset: -1 | 1) => {
@@ -62,6 +71,7 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
 
   useEffect(() => {
     if (!open) return
+    setQuery("")
     setLoading(true)
     void EnvironmentVariableService.GetPath(scope)
       .then((items) => {
@@ -138,13 +148,16 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
 
   const locateEntry = (id: number) => {
     setSelectedId(id)
-    inputRefs.current.get(id)?.focus()
+    const input = inputRefs.current.get(id)
+    input?.focus({ preventScroll: true })
+    input?.scrollIntoView({ block: "nearest" })
   }
 
   const addEntry = () => {
     const id = nextEntryId.current++
+    setQuery("")
     pendingFocusId.current = id
-    setEntries((current) => [...current, { id, value: "", expanded: "", exists: false, validated: false }])
+    setEntries((current) => [...current, { id, value: "", expanded: "", exists: false, duplicate: false, validated: false }])
     setSelectedId(id)
   }
 
@@ -169,32 +182,42 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-2">
-          {missingEntries.length > 0 ? (
-            <>
-              <Alert>
-                <TriangleAlertIcon />
-                <AlertTitle>发现 {missingEntries.length} 个无效路径</AlertTitle>
-                <AlertDescription className="flex flex-col gap-1">
-                  {missingEntries.map((entry) => (
-                    <div key={entry.id} className="flex min-w-0 items-center gap-1.5">
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.value}</span>
-                      <Button variant="ghost" size="xs" onClick={() => locateEntry(entry.id)}>定位</Button>
-                      <Button variant="ghost" size="xs" onClick={() => removeEntry(entry.id)}>删除</Button>
-                    </div>
-                  ))}
-                </AlertDescription>
-              </Alert>
-              <Separator />
-            </>
-          ) : null}
+          <InputGroup className="shrink-0">
+            <InputGroupInput
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索路径"
+              aria-label="搜索 PATH"
+            />
+            <InputGroupAddon><SearchIcon /></InputGroupAddon>
+          </InputGroup>
           <ScrollArea className="-mr-4 min-h-0 flex-1 pr-4">
             {loading ? (
               <div className="flex min-h-full items-center justify-center" aria-label="加载中">
                 <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
               </div>
             ) : (
-              <div className="flex flex-col gap-1">
-                {entries.map((entry, index) => (
+              <div className="flex min-h-full flex-col gap-2 p-1">
+                {[
+                  { title: `发现 ${missingEntries.length} 个无效路径`, items: missingEntries },
+                  { title: `发现 ${duplicateEntries.length} 个重复项`, items: duplicateEntries },
+                ].filter(({ items }) => items.length > 0).map(({ title, items }) => (
+                  <Alert key={title} className="gap-y-1">
+                    <TriangleAlertIcon />
+                    <AlertTitle>{title}</AlertTitle>
+                    <AlertDescription className="flex flex-col gap-0">
+                      {items.map((entry) => (
+                        <div key={entry.id} className="flex min-w-0 items-center gap-1.5">
+                          <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.value}</span>
+                          <Button variant="ghost" size="xs" className="h-5" onClick={() => locateEntry(entry.id)}>定位</Button>
+                          <Button variant="ghost" size="xs" className="h-5" onClick={() => removeEntry(entry.id)}>删除</Button>
+                        </div>
+                      ))}
+                    </AlertDescription>
+                  </Alert>
+                ))}
+                {missingEntries.length > 0 || duplicateEntries.length > 0 ? <Separator /> : null}
+                {visibleEntries.map(({ entry, index }) => (
                   <div
                     key={entry.id}
                     className={cn(
@@ -220,18 +243,27 @@ export function PathEditorDialog({ open, scope, onOpenChange, onSaved }: PathEdi
                         value={entry.value}
                         onChange={(event) => updateEntry(index, event.target.value)}
                         onFocus={() => setSelectedId(entry.id)}
-                        className="min-w-0 pr-16 font-mono text-xs"
+                        className={cn("min-w-0 font-mono text-xs", {
+                          "pr-16": isMissingEntry(entry) || (entry.validated && entry.duplicate),
+                          "pr-28": isMissingEntry(entry) && entry.validated && entry.duplicate,
+                        })}
                         aria-label={`PATH 项 ${index + 1}`}
                       />
-                      {isMissingEntry(entry) ? (
-                        <Badge variant="destructive" className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">不存在</Badge>
-                      ) : null}
+                      <div className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 gap-1">
+                        {isMissingEntry(entry) ? <Badge variant="destructive">不存在</Badge> : null}
+                        {entry.validated && entry.duplicate ? <Badge variant="secondary">重复</Badge> : null}
+                      </div>
                     </div>
                     <Button variant="ghost" size="icon-sm" onClick={() => removeEntry(entry.id)} aria-label="删除 PATH 项">
                       <Trash2Icon />
                     </Button>
                   </div>
                 ))}
+                {visibleEntries.length === 0 ? (
+                  <Empty className="flex-1">
+                    <EmptyHeader><EmptyTitle className="text-muted-foreground">{keyword ? "没有匹配的路径" : "没有路径"}</EmptyTitle></EmptyHeader>
+                  </Empty>
+                ) : null}
               </div>
             )}
           </ScrollArea>

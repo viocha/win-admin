@@ -16,9 +16,10 @@ type SaveEnvironmentVariableRequest struct {
 }
 
 type EnvironmentPathEntry struct {
-	Value    string `json:"value"`
-	Expanded string `json:"expanded"`
-	Exists   bool   `json:"exists"`
+	Value     string `json:"value"`
+	Expanded  string `json:"expanded"`
+	Exists    bool   `json:"exists"`
+	Duplicate bool   `json:"duplicate"`
 }
 
 type SaveEnvironmentPathRequest struct {

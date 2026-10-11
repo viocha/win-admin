@@ -11,6 +11,7 @@ export interface EnvironmentPathEntry {
     "value": string;
     "expanded": string;
     "exists": boolean;
+    "duplicate": boolean;
 }
 
 export interface EnvironmentVariable {
