@@ -984,7 +984,7 @@ function TaskRow({
         onClick={() => { if (!running && !editing) onEdit() }}
         aria-busy={running || editing}
       >
-        <RotateCwIcon
+        <LoaderCircleIcon
           aria-hidden="true"
           className={cn("pointer-events-none absolute top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground", progressing ? "animate-spin" : "invisible")}
           style={{ left: `${depth * 16 + 10}px` }}
