@@ -14,6 +14,13 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+/**
+ * Icons 按可见行批量读取图标，限制并发和单次请求数量。
+ */
+export function Icons(ids: string[] | null): $CancellablePromise<$models.InstalledAppIcon[] | null> {
+    return $Call.ByID(281782352, ids);
+}
+
 export function List(): $CancellablePromise<$models.InstalledApp[] | null> {
     return $Call.ByID(144482274);
 }

@@ -62,6 +62,31 @@ func (s *AppUninstallService) List() ([]InstalledApp, error) {
 	return apps, nil
 }
 
+// Icons 按可见行批量读取图标，限制并发和单次请求数量。
+func (s *AppUninstallService) Icons(ids []string) ([]InstalledAppIcon, error) {
+	if len(ids) > 128 {
+		return nil, errors.New("一次最多读取 128 个应用图标")
+	}
+	results := make([]InstalledAppIcon, len(ids))
+	jobs := make(chan int, len(ids))
+	for index := range ids {
+		jobs <- index
+	}
+	close(jobs)
+	var wg sync.WaitGroup
+	for range min(4, len(ids)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				results[index] = InstalledAppIcon{ID: ids[index], Icon: installedAppIcon(ids[index])}
+			}
+		}()
+	}
+	wg.Wait()
+	return results, nil
+}
+
 func (s *AppUninstallService) Sizes(ids []string) []InstalledAppSize {
 	if len(ids) == 0 {
 		return []InstalledAppSize{}
@@ -249,13 +274,8 @@ func readInstalledApp(location uninstallRegistryLocation, subkeyName string) (In
 		}
 	}
 	return InstalledApp{
-		ID:   encodeInstalledAppID(location, subkeyName),
-		Name: name,
-		Icon: installedAppIconPreview(
-			displayIcon,
-			msiProductIcon(subkeyName),
-			findInstalledAppExecutable(name, installLocation),
-		),
+		ID:               encodeInstalledAppID(location, subkeyName),
+		Name:             name,
 		Version:          strings.TrimSpace(readUninstallString(key, "DisplayVersion")),
 		Publisher:        strings.TrimSpace(readUninstallString(key, "Publisher")),
 		InstallDate:      installDate,
@@ -266,6 +286,30 @@ func readInstalledApp(location uninstallRegistryLocation, subkeyName string) (In
 		Scope:            location.scope,
 		Architecture:     location.architecture,
 	}, nil
+}
+
+func installedAppIcon(id string) string {
+	location, subkeyName, err := decodeInstalledAppID(id)
+	if err != nil {
+		return ""
+	}
+	key, err := registry.OpenKey(location.root, uninstallRegistryPath+`\`+subkeyName, registry.QUERY_VALUE|location.view)
+	if err != nil {
+		return ""
+	}
+	defer key.Close()
+	displayIcon := readUninstallString(key, "DisplayIcon")
+	if icon := installedAppIconPreview(displayIcon); icon != "" {
+		return icon
+	}
+	if icon := installedAppIconPreview(msiProductIcon(subkeyName)); icon != "" {
+		return icon
+	}
+	installLocation := inferInstallLocation(
+		readUninstallString(key, "InstallLocation"), displayIcon,
+		readUninstallString(key, "UninstallString"), readUninstallString(key, "QuietUninstallString"),
+	)
+	return installedAppIconPreview(findInstalledAppExecutable(readUninstallString(key, "DisplayName"), installLocation))
 }
 
 func installedAppSize(id string) (uint64, bool) {

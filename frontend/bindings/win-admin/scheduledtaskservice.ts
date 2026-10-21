@@ -54,6 +54,13 @@ export function ListFolders(): $CancellablePromise<string[] | null> {
     return $Call.ByID(908672592);
 }
 
+/**
+ * ListWithFolders 在一次目录遍历中返回任务与目录。
+ */
+export function ListWithFolders(): $CancellablePromise<$models.ScheduledTaskListing> {
+    return $Call.ByID(592192776);
+}
+
 export function PickExecutable(): $CancellablePromise<string> {
     return $Call.ByID(676604466);
 }

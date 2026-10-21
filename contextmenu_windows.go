@@ -1035,7 +1035,7 @@ func normalizeMenuCommandPaths(entry MenuEntry) MenuEntry {
 }
 
 func resolveCommandExecutable(command string) string {
-	return resolveCommandWith(command, resolveExecutableWithWhere)
+	return resolveCommandWith(command, lookupExecutablePath)
 }
 
 func resolveCommandWith(command string, lookup func(string) string) string {

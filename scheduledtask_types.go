@@ -3,6 +3,11 @@ package main
 // ScheduledTaskService 提供 Windows Task Scheduler 2.0 的管理能力。
 type ScheduledTaskService struct{}
 
+type ScheduledTaskListing struct {
+	Tasks   []ScheduledTaskSummary `json:"tasks"`
+	Folders []string               `json:"folders"`
+}
+
 type ScheduledTaskSummary struct {
 	Name        string `json:"name"`
 	Path        string `json:"path"`

@@ -145,10 +145,7 @@ export function ScheduledTasksPage({ active }: { active: boolean }) {
     const versions = new Map(taskVersionsRef.current)
     if (!silent) setLoading(true)
     try {
-      const [nextTasks, nextFolders] = await Promise.all([
-        ScheduledTaskService.List(),
-        ScheduledTaskService.ListFolders(),
-      ])
+      const { tasks: nextTasks, folders: nextFolders } = await ScheduledTaskService.ListWithFolders()
       if (loadVersion !== loadVersionRef.current) return
       setTasks((current) => {
         const byPath = new Map(current.map((task) => [task.path, task]))

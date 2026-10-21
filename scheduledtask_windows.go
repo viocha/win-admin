@@ -62,15 +62,21 @@ var orderedWeekdays = []string{
 }
 
 func (s *ScheduledTaskService) List() ([]ScheduledTaskSummary, error) {
+	listing, err := s.ListWithFolders()
+	return listing.Tasks, err
+}
+
+// ListWithFolders 在一次目录遍历中返回任务与目录。
+func (s *ScheduledTaskService) ListWithFolders() (ScheduledTaskListing, error) {
 	folders, err := s.ListFolders()
 	if err != nil {
-		return nil, err
+		return ScheduledTaskListing{}, err
 	}
-	folders = append([]string{defaultScheduledTaskFolder}, folders...)
+	allFolders := append([]string{defaultScheduledTaskFolder}, folders...)
 
-	workerCount := min(scheduledTaskListWorkers, len(folders))
-	jobs := make(chan string, len(folders))
-	for _, folderPath := range folders {
+	workerCount := min(scheduledTaskListWorkers, len(allFolders))
+	jobs := make(chan string, len(allFolders))
+	for _, folderPath := range allFolders {
 		jobs <- folderPath
 	}
 	close(jobs)
@@ -108,14 +114,14 @@ func (s *ScheduledTaskService) List() ([]ScheduledTaskSummary, error) {
 	}
 	for workerErr := range errors {
 		if workerErr != nil {
-			return nil, workerErr
+			return ScheduledTaskListing{}, workerErr
 		}
 	}
 
 	sort.SliceStable(items, func(i, j int) bool {
 		return strings.ToLower(items[i].Path) < strings.ToLower(items[j].Path)
 	})
-	return items, nil
+	return ScheduledTaskListing{Tasks: items, Folders: folders}, nil
 }
 
 func (s *ScheduledTaskService) ListFolders() ([]string, error) {
@@ -185,9 +191,14 @@ func (s *ScheduledTaskService) History(taskPath string, limit int) ([]ScheduledT
 }
 
 func runTaskHistoryCommand(args ...string) ([]byte, error) {
-	command := exec.Command("wevtutil.exe", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "wevtutil.exe", args...)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	output, err := command.CombinedOutput()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("任务历史命令超时: %w", ctx.Err())
+	}
 	if err != nil {
 		message := strings.TrimSpace(string(output))
 		if message != "" {
@@ -676,6 +687,7 @@ func controlScheduledTask(taskPath, operation string, onStateChange func(Schedul
 			return ScheduledTaskSummary{}, err
 		}
 		defer release()
+		baseSummary := readScheduledTaskSummary(task)
 		if operation != "stop" {
 			if !getDispatchBool(task, "Enabled") {
 				return ScheduledTaskSummary{}, errors.New("计划任务已禁用，无法启动")
@@ -737,8 +749,10 @@ func controlScheduledTask(taskPath, operation string, onStateChange func(Schedul
 				if err != nil {
 					return false, err
 				}
-				summary := readScheduledTaskSummary(current)
-				summary.State = scheduledTaskStateName(state)
+				summary, err := readScheduledTaskRuntimeSummary(current, baseSummary, state)
+				if err != nil {
+					return false, err
+				}
 				publish(summary)
 				return count == 0 && (state == 1 || state == 3), err
 			})
@@ -777,7 +791,7 @@ func controlScheduledTask(taskPath, operation string, onStateChange func(Schedul
 				return false, stateErr
 			}
 			var err error
-			summary, err = freshScheduledTaskSummary(service, taskPath)
+			summary, err = freshScheduledTaskRuntimeSummary(service, taskPath, baseSummary)
 			if err != nil {
 				return false, err
 			}
@@ -834,7 +848,7 @@ func scheduledTaskStartConfirmed(instanceState int, summary ScheduledTaskSummary
 
 func waitScheduledTask(ctx context.Context, message string, check func() (bool, error)) error {
 	// 状态接口没有变更订阅；仅在操作期间有界查询，不用延时猜测完成。
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
@@ -889,6 +903,33 @@ func freshScheduledTaskSummary(service *ole.IDispatch, path string) (ScheduledTa
 		return ScheduledTaskSummary{}, err
 	}
 	summary.LastResult = int32(result)
+	return summary, nil
+}
+
+// 等待期间仅刷新运行信息，任务命令和路径复用本次操作读取的定义。
+func freshScheduledTaskRuntimeSummary(service *ole.IDispatch, path string, base ScheduledTaskSummary) (ScheduledTaskSummary, error) {
+	task, release, err := getRegisteredTask(service, path)
+	if err != nil {
+		return ScheduledTaskSummary{}, err
+	}
+	defer release()
+	state, err := scheduledTaskIntProperty(task, "State")
+	if err != nil {
+		return ScheduledTaskSummary{}, err
+	}
+	return readScheduledTaskRuntimeSummary(task, base, state)
+}
+
+func readScheduledTaskRuntimeSummary(task *ole.IDispatch, summary ScheduledTaskSummary, state int) (ScheduledTaskSummary, error) {
+	result, err := scheduledTaskIntProperty(task, "LastTaskResult")
+	if err != nil {
+		return ScheduledTaskSummary{}, err
+	}
+	summary.State = scheduledTaskStateName(state)
+	summary.LastResult = int32(result)
+	summary.Enabled = getDispatchBool(task, "Enabled")
+	summary.LastRunTime = getDispatchDate(task, "LastRunTime")
+	summary.NextRunTime = getDispatchDate(task, "NextRunTime")
 	return summary, nil
 }
 

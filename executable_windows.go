@@ -3,11 +3,10 @@
 package main
 
 import (
-	"os"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 func commandExecutableIsPath(executable string) bool {
@@ -25,7 +24,7 @@ func quoteCommandExecutable(executable string) string {
 }
 
 func resolveExecutablePath(value string) string {
-	return resolveExecutablePathWith(value, resolveExecutableWithWhere)
+	return resolveExecutablePathWith(value, lookupExecutablePath)
 }
 
 func resolveExecutablePathWith(value string, lookup func(string) string) string {
@@ -48,30 +47,23 @@ func resolveExecutablePathWith(value string, lookup func(string) string) string 
 	return resolved
 }
 
-func resolveExecutableWithWhere(executable string) string {
-	wherePath := "where.exe"
-	if systemRoot := strings.TrimSpace(os.Getenv("SystemRoot")); systemRoot != "" {
-		candidate := filepath.Join(systemRoot, "System32", "where.exe")
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			wherePath = candidate
+func lookupExecutablePath(executable string) string {
+	// 显式查找当前目录，保留 where 的解析顺序；LookPath 负责 PATHEXT。
+	if current, err := filepath.Abs(executable); err == nil {
+		if resolved, err := exec.LookPath(current); err == nil {
+			return resolved
 		}
 	}
-
-	command := exec.Command(wherePath, executable)
-	command.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	resolved, err := exec.LookPath(executable)
+	if err != nil && !errors.Is(err, exec.ErrDot) {
+		return ""
 	}
-	output, err := command.Output()
+	if resolved == "" {
+		return ""
+	}
+	absolute, err := filepath.Abs(resolved)
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.FieldsFunc(string(output), func(r rune) bool {
-		return r == '\r' || r == '\n'
-	}) {
-		if candidate := strings.TrimSpace(line); candidate != "" {
-			return candidate
-		}
-	}
-	return ""
+	return absolute
 }

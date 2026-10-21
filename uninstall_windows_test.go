@@ -5,7 +5,10 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"golang.org/x/sys/windows/registry"
 )
 
 func TestPackedMSIProductCode(t *testing.T) {
@@ -49,5 +52,41 @@ func TestInstalledAppRegistryPath(t *testing.T) {
 		if got := installedAppRegistryPath(test.location, "Demo"); got != test.want {
 			t.Errorf("installedAppRegistryPath() = %q, want %q", got, test.want)
 		}
+	}
+}
+
+func TestInstalledAppIconsBatch(t *testing.T) {
+	s := &AppUninstallService{}
+	items, err := s.Icons(nil)
+	if err != nil || items == nil || len(items) != 0 {
+		t.Fatalf("空批次 = %+v，错误 = %v", items, err)
+	}
+	items, err = s.Icons([]string{"无效 ID", "另一个无效 ID"})
+	if err != nil || len(items) != 2 || items[0].ID != "无效 ID" || items[1].ID != "另一个无效 ID" || items[0].Icon != "" || items[1].Icon != "" {
+		t.Fatalf("图标缺失时应保留请求顺序和 ID：%+v，错误 = %v", items, err)
+	}
+	if _, err = s.Icons(make([]string, 129)); err == nil {
+		t.Fatal("应拒绝超过 128 个图标的批次")
+	}
+}
+
+func TestInstalledAppIconsFromRegistry(t *testing.T) {
+	name := "win-admin-icon-test-" + filepath.Base(filepath.Dir(t.TempDir()))
+	path := uninstallRegistryPath + `\` + name
+	key, _, err := registry.CreateKey(registry.CURRENT_USER, path, registry.SET_VALUE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { registry.DeleteKey(registry.CURRENT_USER, path) })
+	iconPath := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+	if err := key.SetStringValue("DisplayIcon", iconPath); err != nil {
+		key.Close()
+		t.Fatal(err)
+	}
+	key.Close()
+	id := encodeInstalledAppID(uninstallLocations[2], name)
+	items, err := (&AppUninstallService{}).Icons([]string{id})
+	if err != nil || len(items) != 1 || items[0].ID != id || !strings.HasPrefix(items[0].Icon, "data:image/png;base64,") {
+		t.Fatalf("应返回注册应用的 PNG 图标，错误 = %v", err)
 	}
 }

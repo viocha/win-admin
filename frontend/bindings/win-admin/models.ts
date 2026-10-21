@@ -46,6 +46,11 @@ export interface InstalledApp {
     "architecture": string;
 }
 
+export interface InstalledAppIcon {
+    "id": string;
+    "icon": string;
+}
+
 export interface InstalledAppSize {
     "id": string;
     "estimatedSizeKB": number;
@@ -133,6 +138,11 @@ export interface ScheduledTaskHistoryEvent {
     "message": string;
     "resultCode": string;
     "details": string;
+}
+
+export interface ScheduledTaskListing {
+    "tasks": ScheduledTaskSummary[] | null;
+    "folders": string[] | null;
 }
 
 export interface ScheduledTaskSettings {

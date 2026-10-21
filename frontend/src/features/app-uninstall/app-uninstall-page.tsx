@@ -74,6 +74,8 @@ export function AppUninstallPage({ active }: { active: boolean }) {
   const [sort, setSort] = useState<SortState>(loadSortState)
   const hasLoadedRef = useRef(false)
   const loadGenerationRef = useRef(0)
+  const iconContainerRef = useRef<HTMLDivElement>(null)
+  const [iconRevision, setIconRevision] = useState(0)
 
   const load = useCallback(async (silent = false) => {
     const generation = ++loadGenerationRef.current
@@ -81,7 +83,11 @@ export function AppUninstallPage({ active }: { active: boolean }) {
     try {
       const nextApps = (await AppUninstallService.List()) ?? []
       if (generation !== loadGenerationRef.current) return
-      setApps(nextApps)
+      setApps((current) => {
+        const icons = new Map(current.map((app) => [app.id, app.icon]))
+        return nextApps.map((app) => ({ ...app, icon: icons.get(app.id) ?? app.icon }))
+      })
+      setIconRevision(generation)
       hasLoadedRef.current = true
 
       const missingSizeIds = nextApps
@@ -123,6 +129,49 @@ export function AppUninstallPage({ active }: { active: boolean }) {
 
     return filtered.toSorted((left, right) => compareApps(left, right, sort.key, sort.direction))
   }, [apps, query, sort])
+
+  const visibleAppIdsKey = JSON.stringify(visibleApps.map((app) => app.id))
+  useEffect(() => {
+    if (!active || loading || !iconContainerRef.current) return
+    const generation = loadGenerationRef.current
+    let cancelled = false
+    let requesting = false
+    const pending = new Set<string>()
+    const loadIcons = async () => {
+      if (requesting || cancelled) return
+      requesting = true
+      try {
+        while (pending.size && !cancelled) {
+          const ids = [...pending].slice(0, 128)
+          ids.forEach((id) => pending.delete(id))
+          const icons = (await AppUninstallService.Icons(ids)) ?? []
+          if (cancelled || generation !== loadGenerationRef.current) return
+          const byId = new Map(icons.map((item) => [item.id, item.icon]))
+          setApps((current) => current.map((app) => (
+            byId.has(app.id) ? { ...app, icon: byId.get(app.id) ?? "" } : app
+          )))
+        }
+      } catch (reason) {
+        if (!cancelled && generation === loadGenerationRef.current) showError(reason, "无法读取应用图标")
+      } finally {
+        requesting = false
+      }
+    }
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        const id = (entry.target as HTMLElement).dataset.appIconId
+        if (id) pending.add(id)
+        observer.unobserve(entry.target)
+      }
+      void loadIcons()
+    })
+    iconContainerRef.current.querySelectorAll<HTMLElement>("[data-app-icon-id]").forEach((element) => observer.observe(element))
+    return () => {
+      cancelled = true
+      observer.disconnect()
+    }
+  }, [active, loading, visibleAppIdsKey, iconRevision])
 
   const changeSort = (nextKey: SortKey) => {
     if (nextKey === sort.key) {
@@ -169,7 +218,7 @@ export function AppUninstallPage({ active }: { active: boolean }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col p-4 lg:p-6">
+    <div ref={iconContainerRef} className="flex h-full min-h-0 w-full flex-col p-4 lg:p-6">
       <div className="flex shrink-0 flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
@@ -219,7 +268,7 @@ export function AppUninstallPage({ active }: { active: boolean }) {
                       <ContextMenuTrigger render={<TableRow />}>
                         <TableCell className="min-w-0">
                           <div className="flex min-w-0 items-center gap-2">
-                            <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/40">
+                            <div data-app-icon-id={app.icon ? undefined : app.id} className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/40">
                               {app.icon ? (
                                 <img src={app.icon} alt="" className="size-6 object-contain" />
                               ) : (

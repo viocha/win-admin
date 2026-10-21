@@ -22,3 +22,8 @@ type InstalledAppSize struct {
 	ID              string `json:"id"`
 	EstimatedSizeKB uint64 `json:"estimatedSizeKB"`
 }
+
+type InstalledAppIcon struct {
+	ID   string `json:"id"`
+	Icon string `json:"icon"`
+}
